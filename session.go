@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"log"
 	"sync"
 
 	"github.com/quic-go/quic-go/quicvarint"
@@ -47,6 +48,10 @@ func NewSession(conn Connection) (*Session, error) {
 		sendFlows:         map[uint64]*SendFlow{},
 		receiveFlows:      map[uint64]*ReceiveFlow{},
 	}
+	return s, nil
+}
+
+func (s *Session) Start() {
 	go func() {
 		if err := s.receiveDatagrams(); err != nil {
 			// TODO
@@ -59,7 +64,6 @@ func NewSession(conn Connection) (*Session, error) {
 			panic(err)
 		}
 	}()
-	return s, nil
 }
 
 func (s *Session) NewSendFlow(id uint64) (*SendFlow, error) {
@@ -120,6 +124,7 @@ func (s *Session) handleDatagram(packet []byte) {
 		f.push(packet[quicvarint.Len(flowID):])
 		return
 	}
+	log.Printf("got unknown flow ID: %v", flowID)
 	panic("TODO: Handle unknown flow IDs")
 }
 
@@ -135,5 +140,6 @@ func (s *Session) handleUniStream(rs ReceiveStream) {
 		f.readStream(rs)
 		return
 	}
+	log.Printf("got unknown flow ID: %v", flowID)
 	panic("TODO: Handle unknown flow IDs")
 }

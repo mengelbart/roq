@@ -1,7 +1,9 @@
 package roq
 
 import (
+	"errors"
 	"io"
+	"log"
 	"time"
 
 	"github.com/quic-go/quic-go/quicvarint"
@@ -28,17 +30,22 @@ func (f *ReceiveFlow) push(packet []byte) {
 
 func (f *ReceiveFlow) readStream(rs ReceiveStream) {
 	reader := quicvarint.NewReader(rs)
+
 	for {
 		length, err := quicvarint.Read(reader)
 		if err != nil {
-			panic(err)
+			if err == io.EOF {
+				return
+			}
+			log.Printf("got unexpected error while reading length: %v", err)
+			return
 		}
 		buf := make([]byte, length)
-		_, err = io.ReadFull(reader, buf)
+		n, err := io.ReadFull(reader, buf)
 		if err != nil {
 			panic(err)
 		}
-		f.push(buf)
+		f.push(buf[:n])
 	}
 }
 
@@ -49,7 +56,7 @@ func (f *ReceiveFlow) Read(buf []byte) (int, error) {
 		return n, nil
 	case <-time.After(time.Second):
 		// TODO: Implement real deadline
-		return 0, nil
+		return 0, errors.New("deadline exceeded")
 	}
 }
 

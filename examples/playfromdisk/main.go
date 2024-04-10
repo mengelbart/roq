@@ -7,6 +7,8 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"log"
+	"math"
 	"os"
 	"time"
 
@@ -45,6 +47,7 @@ func main() {
 	default:
 		panic(fmt.Sprintf("Unable to handle FourCC %s", header.FourCC))
 	}
+	log.Printf("got payloader: %T", payloader)
 
 	packetizer := rtp.NewPacketizer(1200, 96, 1, payloader, rtp.NewRandomSequencer(), 90_000)
 
@@ -60,10 +63,16 @@ func main() {
 
 	conn, err := quic.DialAddr(context.Background(), *addr, &tls.Config{
 		InsecureSkipVerify: true,
-		NextProtos:         []string{"rtp-mux-quic-07"},
+		NextProtos:         []string{"roq-09"},
 	}, &quic.Config{
-		EnableDatagrams: true,
-		Tracer:          qlog.DefaultTracer,
+		InitialStreamReceiveWindow:     math.MaxInt32,
+		MaxStreamReceiveWindow:         math.MaxInt32,
+		InitialConnectionReceiveWindow: math.MaxInt32,
+		MaxConnectionReceiveWindow:     math.MaxInt32,
+		MaxIncomingStreams:             math.MaxInt32,
+		MaxIncomingUniStreams:          math.MaxInt32,
+		EnableDatagrams:                true,
+		Tracer:                         qlog.DefaultTracer,
 	})
 	if err != nil {
 		panic(err)
@@ -74,10 +83,6 @@ func main() {
 	}
 
 	flow, err := session.NewSendFlow(0)
-	if err != nil {
-		panic(err)
-	}
-	stream, err := flow.NewSendStream(context.Background())
 	if err != nil {
 		panic(err)
 	}
@@ -94,6 +99,10 @@ func main() {
 			panic(ivfErr)
 		}
 
+		stream, err := flow.NewSendStream(context.Background())
+		if err != nil {
+			panic(err)
+		}
 		packets := packetizer.Packetize(frame, 1)
 		for _, pkt := range packets {
 			buf, err := pkt.Marshal()
@@ -105,6 +114,6 @@ func main() {
 				panic(err)
 			}
 		}
+		stream.Close()
 	}
-	stream.Close()
 }
