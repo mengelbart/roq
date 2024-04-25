@@ -8,7 +8,7 @@ import (
 
 	"github.com/mengelbart/roq"
 	"github.com/pion/rtp"
-	"github.com/pion/webrtc/v3/pkg/media/h264writer"
+	"github.com/pion/webrtc/v3/pkg/media/ivfwriter"
 	"github.com/quic-go/quic-go"
 	"github.com/quic-go/quic-go/qlog"
 )
@@ -38,18 +38,18 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-	flow, err := session.NewReceiveFlow(1)
+	flow, err := session.NewReceiveFlow(0)
 	if err != nil {
 		panic(err)
 	}
-	// fileWriter, err := ivfwriter.New("output.ivf")
-	// if err != nil {
-	// 	panic(err)
-	// }
-	fileWriter, err := h264writer.New("output.h264")
+	fileWriter, err := ivfwriter.New("output.ivf")
 	if err != nil {
 		panic(err)
 	}
+	//fileWriter, err := h264writer.New("output.h264")
+	//if err != nil {
+	//	panic(err)
+	//}
 	defer fileWriter.Close()
 	session.Start()
 	buf := make([]byte, 4096)
