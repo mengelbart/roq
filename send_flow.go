@@ -50,7 +50,10 @@ func (f *SendFlow) NewSendStream(ctx context.Context) (*RTPSendStream, error) {
 	if err != nil {
 		return nil, err
 	}
-	stream := newRTPSendStream(s, f.flowID)
+	stream, err := newRTPSendStream(s, f.flowID)
+	if err != nil {
+		return nil, err
+	}
 	f.lock.Lock()
 	defer f.lock.Unlock()
 	f.streams = append(f.streams, stream)
