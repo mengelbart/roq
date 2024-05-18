@@ -22,7 +22,7 @@ import (
 
 func main() {
 	videoFileName := flag.String("file", "output.ivf", "IVF video file to read")
-	addr := flag.String("addr", "localhost:443", "address to connect and send video to")
+	addr := flag.String("addr", "localhost:4443", "address to connect and send video to")
 	flag.Parse()
 
 	file, openErr := os.Open(*videoFileName)

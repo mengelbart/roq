@@ -10,6 +10,10 @@ type quicGoReceiveStream struct {
 	stream quic.ReceiveStream
 }
 
+func (s *quicGoReceiveStream) ID() int64 {
+	return int64(s.stream.StreamID())
+}
+
 func (s *quicGoReceiveStream) CancelRead(c uint64) {
 	s.stream.CancelRead(quic.StreamErrorCode(c))
 }
@@ -70,4 +74,8 @@ func (c *QUICGoConnection) AcceptUniStream(ctx context.Context) (ReceiveStream, 
 	return &quicGoReceiveStream{
 		stream: s,
 	}, nil
+}
+
+func (c *QUICGoConnection) CloseWithError(code uint64, reason string) error {
+	return c.conn.CloseWithError(quic.ApplicationErrorCode(code), reason)
 }
