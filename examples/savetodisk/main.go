@@ -16,7 +16,7 @@ import (
 func main() {
 	cert := flag.String("cert", "cert.pem", "Cert file")
 	key := flag.String("key", "key.pem", "Key file")
-	addr := flag.String("addr", "localhost:443", "address to connect and send video to")
+	addr := flag.String("addr", "localhost:4443", "address to connect and send video to")
 	flag.Parse()
 
 	tlsConfig, err := generateTLSConfigWithCertAndKey(*cert, *key)
@@ -46,12 +46,7 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-	//fileWriter, err := h264writer.New("output.h264")
-	//if err != nil {
-	//	panic(err)
-	//}
 	defer fileWriter.Close()
-	session.Start()
 	buf := make([]byte, 4096)
 	for {
 		n, err := flow.Read(buf)

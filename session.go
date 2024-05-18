@@ -5,13 +5,12 @@ import (
 	"context"
 	"errors"
 	"io"
-	"log"
 	"sync"
 
 	"github.com/quic-go/quic-go/quicvarint"
 )
 
-const DEFAULT_RECEIVE_BUFFER_SIZE = 1024 // Number of packets to buffer
+const defaultReceiveBufferSize = 1024 // Number of packets to buffer
 
 type SendStream interface {
 	io.Writer
@@ -21,6 +20,7 @@ type SendStream interface {
 
 type ReceiveStream interface {
 	io.Reader
+	ID() int64
 	CancelRead(uint64)
 }
 
@@ -29,67 +29,111 @@ type Connection interface {
 	ReceiveDatagram(context.Context) ([]byte, error)
 	OpenUniStreamSync(context.Context) (SendStream, error)
 	AcceptUniStream(context.Context) (ReceiveStream, error)
+	CloseWithError(uint64, string) error
 }
 
 type Session struct {
 	receiveBufferSize int
-
-	lock         sync.Mutex
-	conn         Connection
-	sendFlows    map[uint64]*SendFlow
-	receiveFlows map[uint64]*ReceiveFlow
+	conn              Connection
+	ctx               context.Context
+	cancelCtx         context.CancelCauseFunc
+	wg                sync.WaitGroup
+	sendFlows         *syncMap[uint64, *SendFlow]
+	receiveFlows      *syncMap[uint64, *ReceiveFlow]
+	receiveFlowBuffer *receiveFlowBuffer
 }
 
 func NewSession(conn Connection) (*Session, error) {
+	ctx, cancel := context.WithCancelCause(context.Background())
 	s := &Session{
-		receiveBufferSize: DEFAULT_RECEIVE_BUFFER_SIZE,
-		lock:              sync.Mutex{},
+		receiveBufferSize: defaultReceiveBufferSize,
 		conn:              conn,
-		sendFlows:         map[uint64]*SendFlow{},
-		receiveFlows:      map[uint64]*ReceiveFlow{},
+		ctx:               ctx,
+		cancelCtx:         cancel,
+		wg:                sync.WaitGroup{},
+		sendFlows:         newSyncMap[uint64, *SendFlow](),
+		receiveFlows:      newSyncMap[uint64, *ReceiveFlow](),
+		receiveFlowBuffer: newReceiveFlowBuffer(16),
 	}
+	s.start()
 	return s, nil
 }
 
-func (s *Session) Start() {
+func (s *Session) start() {
+	s.wg.Add(2)
 	go func() {
+		defer s.wg.Done()
 		if err := s.receiveDatagrams(); err != nil {
-			// TODO
-			panic(err)
+			s.Close()
 		}
 	}()
 	go func() {
+		defer s.wg.Done()
 		if err := s.receiveUniStreams(); err != nil {
-			// TODO
-			panic(err)
+			s.Close()
 		}
 	}()
 }
 
 func (s *Session) NewSendFlow(id uint64) (*SendFlow, error) {
-	s.lock.Lock()
-	defer s.lock.Unlock()
-	if _, ok := s.sendFlows[id]; ok {
+	if err := s.isClosed(); err != nil {
+		return nil, err
+	}
+	if _, ok := s.sendFlows.get(id); ok {
 		return nil, errors.New("duplicate flow ID")
 	}
 	f := newFlow(s.conn, id, func() {
-		s.lock.Lock()
-		defer s.lock.Unlock()
-		delete(s.sendFlows, id)
+		s.sendFlows.delete(id)
 	})
-	s.sendFlows[id] = f
+	if err := s.sendFlows.add(id, f); err != nil {
+		return nil, err
+	}
 	return f, nil
 }
 
 func (s *Session) NewReceiveFlow(id uint64) (*ReceiveFlow, error) {
-	s.lock.Lock()
-	defer s.lock.Unlock()
-	if _, ok := s.receiveFlows[id]; ok {
+	if err := s.isClosed(); err != nil {
+		return nil, err
+	}
+	if _, ok := s.receiveFlows.get(id); ok {
 		return nil, errors.New("duplicate flow ID")
 	}
-	f := newReceiveFlow(id, s.receiveBufferSize)
-	s.receiveFlows[id] = f
+	var f *ReceiveFlow
+	f = s.receiveFlowBuffer.pop(id)
+	if f == nil {
+		f = newReceiveFlow(id, s.receiveBufferSize)
+	}
+	if err := s.receiveFlows.add(id, f); err != nil {
+		return nil, err
+	}
 	return f, nil
+}
+
+func (s *Session) isClosed() error {
+	select {
+	case <-s.ctx.Done():
+		return s.ctx.Err()
+	default:
+		return nil
+	}
+}
+
+func (s *Session) close(code uint64, reason string) {
+	s.sendFlows.rangeFn(func(_ uint64, v *SendFlow) { v.Close() })
+	s.receiveFlows.rangeFn(func(_ uint64, v *ReceiveFlow) { v.Close() })
+	_ = s.conn.CloseWithError(code, reason)
+	s.wg.Wait()
+}
+
+func (s *Session) closeWithError(code uint64, reason string) {
+	s.cancelCtx(errors.New(reason))
+	s.close(code, reason)
+}
+
+func (s *Session) Close() error {
+	s.cancelCtx(nil)
+	s.close(ErrRoQNoError, "")
+	return nil
 }
 
 func (s *Session) receiveUniStreams() error {
@@ -98,7 +142,11 @@ func (s *Session) receiveUniStreams() error {
 		if err != nil {
 			return err
 		}
-		go s.handleUniStream(rs)
+		s.wg.Add(1)
+		go func() {
+			defer s.wg.Done()
+			s.handleUniStream(rs)
+		}()
 	}
 }
 
@@ -108,7 +156,11 @@ func (s *Session) receiveDatagrams() error {
 		if err != nil {
 			return err
 		}
-		go s.handleDatagram(dgram)
+		s.wg.Add(1)
+		go func() {
+			defer s.wg.Done()
+			s.handleDatagram(dgram)
+		}()
 	}
 }
 
@@ -116,30 +168,36 @@ func (s *Session) handleDatagram(packet []byte) {
 	reader := quicvarint.NewReader(bytes.NewReader(packet))
 	flowID, err := quicvarint.Read(reader)
 	if err != nil {
-		panic(err)
+		s.closeWithError(ErrRoQPacketError, "invalid flow ID")
+		return
 	}
-	s.lock.Lock()
-	defer s.lock.Unlock()
-	if f, ok := s.receiveFlows[flowID]; ok {
+	if f, ok := s.receiveFlows.get(flowID); ok {
 		f.push(packet[quicvarint.Len(flowID):])
 		return
 	}
-	log.Printf("got unknown flow ID: %v", flowID)
-	panic("TODO: Handle unknown flow IDs")
+	f := s.receiveFlowBuffer.get(flowID)
+	if f == nil {
+		f = newReceiveFlow(flowID, s.receiveBufferSize)
+		s.receiveFlowBuffer.add(f)
+	}
+	f.push(packet[quicvarint.Len(flowID):])
 }
 
 func (s *Session) handleUniStream(rs ReceiveStream) {
 	reader := quicvarint.NewReader(rs)
 	flowID, err := quicvarint.Read(reader)
 	if err != nil {
-		panic(err)
+		s.closeWithError(ErrRoQPacketError, "invalid flow ID")
+		return
 	}
-	s.lock.Lock()
-	defer s.lock.Unlock()
-	if f, ok := s.receiveFlows[flowID]; ok {
+	if f, ok := s.receiveFlows.get(flowID); ok {
 		f.readStream(rs)
 		return
 	}
-	log.Printf("got unknown flow ID: %v", flowID)
-	panic("TODO: Handle unknown flow IDs")
+	f := s.receiveFlowBuffer.get(flowID)
+	if f == nil {
+		f = newReceiveFlow(flowID, s.receiveBufferSize)
+		s.receiveFlowBuffer.add(f)
+	}
+	f.readStream(rs)
 }

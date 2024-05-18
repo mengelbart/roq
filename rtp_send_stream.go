@@ -25,7 +25,8 @@ func (s *RTPSendStream) WriteRTPBytes(packet []byte) (int, error) {
 	buf := make([]byte, 0, uint64(length)+uint64(len(packet)))
 	buf = quicvarint.Append(buf, uint64(len(packet)))
 	buf = append(buf, packet...)
-	return s.stream.Write(buf)
+	_, err := s.stream.Write(buf)
+	return len(packet), err
 }
 
 // CancelStream closes the stream with the given error code.
