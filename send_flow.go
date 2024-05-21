@@ -23,7 +23,7 @@ type SendFlow struct {
 func newFlow(conn Connection, id uint64, onClose func()) *SendFlow {
 	flowID := make([]byte, 0, quicvarint.Len(id))
 	flowID = quicvarint.Append(flowID, id)
-	scratch := make([]byte, 1500)
+	scratch := make([]byte, 1<<16)
 	scratch = append(scratch, flowID...)
 	ctx, cancel := context.WithCancel(context.Background())
 	return &SendFlow{

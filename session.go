@@ -34,6 +34,7 @@ type Connection interface {
 
 type Session struct {
 	receiveBufferSize int
+	acceptDatagrams   bool
 	conn              Connection
 	ctx               context.Context
 	cancelCtx         context.CancelCauseFunc
@@ -43,10 +44,11 @@ type Session struct {
 	receiveFlowBuffer *receiveFlowBuffer
 }
 
-func NewSession(conn Connection) (*Session, error) {
+func NewSession(conn Connection, acceptDatagrams bool) (*Session, error) {
 	ctx, cancel := context.WithCancelCause(context.Background())
 	s := &Session{
 		receiveBufferSize: defaultReceiveBufferSize,
+		acceptDatagrams:   acceptDatagrams,
 		conn:              conn,
 		ctx:               ctx,
 		cancelCtx:         cancel,
@@ -60,13 +62,17 @@ func NewSession(conn Connection) (*Session, error) {
 }
 
 func (s *Session) start() {
-	s.wg.Add(2)
-	go func() {
-		defer s.wg.Done()
-		if err := s.receiveDatagrams(); err != nil {
-			s.Close()
-		}
-	}()
+	if s.acceptDatagrams {
+		s.wg.Add(1)
+		go func() {
+			defer s.wg.Done()
+			if err := s.receiveDatagrams(); err != nil {
+				s.Close()
+			}
+		}()
+	}
+
+	s.wg.Add(1)
 	go func() {
 		defer s.wg.Done()
 		if err := s.receiveUniStreams(); err != nil {

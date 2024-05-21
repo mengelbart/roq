@@ -34,7 +34,7 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-	session, err := roq.NewSession(roq.NewQUICGoConnection(conn))
+	session, err := roq.NewSession(roq.NewQUICGoConnection(conn), true)
 	if err != nil {
 		panic(err)
 	}
