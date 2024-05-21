@@ -26,7 +26,7 @@ func accept(t *testing.T, ctx context.Context, listener *quic.Listener) *roq.Ses
 	conn, err := listener.Accept(ctx)
 	assert.NoError(t, err)
 	assert.NoError(t, err)
-	s, err := roq.NewSession(roq.NewQUICGoConnection(conn))
+	s, err := roq.NewSession(roq.NewQUICGoConnection(conn), true)
 	assert.NoError(t, err)
 	return s
 }
@@ -34,7 +34,7 @@ func accept(t *testing.T, ctx context.Context, listener *quic.Listener) *roq.Ses
 func dial(t *testing.T, ctx context.Context, addr string) *roq.Session {
 	conn, err := quic.DialAddr(ctx, addr, generateTLSConfig(), &quic.Config{EnableDatagrams: true})
 	assert.NoError(t, err)
-	s, err := roq.NewSession(roq.NewQUICGoConnection(conn))
+	s, err := roq.NewSession(roq.NewQUICGoConnection(conn), true)
 	assert.NoError(t, err)
 	return s
 }
