@@ -2,7 +2,6 @@ package roq
 
 import (
 	"context"
-	"errors"
 	"sync"
 
 	"github.com/quic-go/quic-go/quicvarint"
@@ -13,7 +12,6 @@ type SendFlow struct {
 	id      uint64
 	conn    Connection
 	flowID  []byte
-	scratch []byte
 	streams []*RTPSendStream
 	ctx     context.Context
 	cancel  context.CancelFunc
@@ -23,15 +21,12 @@ type SendFlow struct {
 func newFlow(conn Connection, id uint64, onClose func()) *SendFlow {
 	flowID := make([]byte, 0, quicvarint.Len(id))
 	flowID = quicvarint.Append(flowID, id)
-	scratch := make([]byte, 1<<16)
-	scratch = append(scratch, flowID...)
 	ctx, cancel := context.WithCancel(context.Background())
 	return &SendFlow{
 		lock:    sync.Mutex{},
 		id:      id,
 		conn:    conn,
 		flowID:  flowID,
-		scratch: scratch,
 		streams: []*RTPSendStream{},
 		ctx:     ctx,
 		cancel:  cancel,
@@ -44,11 +39,10 @@ func (f *SendFlow) WriteRTPBytes(packet []byte) error {
 	if err := f.isClosed(); err != nil {
 		return err
 	}
-	n := copy(f.scratch[len(f.flowID):], packet)
-	if n < len(packet) {
-		return errors.New("copied unexpected number of bytes")
-	}
-	return f.conn.SendDatagram(f.scratch[:n+len(f.flowID)])
+	buf := make([]byte, 0, len(f.flowID)+len(packet))
+	buf = append(buf, f.flowID...)
+	buf = append(buf, packet...)
+	return f.conn.SendDatagram(buf)
 }
 
 // NewSendStream creates a new Stream for sending outgoing RTP and RTCP packets
