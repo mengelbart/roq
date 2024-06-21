@@ -1,7 +1,6 @@
 package roq
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"io"
@@ -171,8 +170,7 @@ func (s *Session) receiveDatagrams() error {
 }
 
 func (s *Session) handleDatagram(packet []byte) {
-	reader := quicvarint.NewReader(bytes.NewReader(packet))
-	flowID, err := quicvarint.Read(reader)
+	flowID, n, err := quicvarint.Parse(packet)
 	if err != nil {
 		s.closeWithError(ErrRoQPacketError, "invalid flow ID")
 		return
@@ -186,7 +184,7 @@ func (s *Session) handleDatagram(packet []byte) {
 		f = newReceiveFlow(flowID, s.receiveBufferSize)
 		s.receiveFlowBuffer.add(f)
 	}
-	f.push(packet[quicvarint.Len(flowID):])
+	f.push(packet[n:])
 }
 
 func (s *Session) handleUniStream(rs ReceiveStream) {
