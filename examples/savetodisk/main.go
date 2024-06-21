@@ -42,6 +42,7 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
+	defer flow.Close()
 	fileWriter, err := ivfwriter.New("output.ivf")
 	if err != nil {
 		panic(err)
@@ -52,7 +53,7 @@ func main() {
 		n, err := flow.Read(buf)
 		if err != nil {
 			log.Println(err)
-			continue
+			return
 		}
 		log.Printf("received buffer of length %v", n)
 		var pkt rtp.Packet
