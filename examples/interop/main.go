@@ -82,7 +82,14 @@ func parseFlags() flags {
 func setupAndRun(ctx context.Context) error {
 	f := readConfig()
 	log.Printf("got config: %v\n", f)
-	conn, err := connect(ctx, f)
+	keyLog, err := getSSLKeyLog()
+	if err != nil {
+		return err
+	}
+	if keyLog != nil {
+		defer keyLog.Close()
+	}
+	conn, err := connect(ctx, f, keyLog)
 	if err != nil {
 		return err
 	}
@@ -92,14 +99,11 @@ func setupAndRun(ctx context.Context) error {
 	return runReceiver(ctx, f, conn)
 }
 
-func connect(ctx context.Context, f flags) (quic.Connection, error) {
+func connect(ctx context.Context, f flags, keyLog io.Writer) (quic.Connection, error) {
 	if f.server {
-		var tlsConfig *tls.Config
-		var err error
-		tlsConfig, err = generateTLSConfigWithCertAndKey(f.cert, f.key)
+		tlsConfig, err := generateTLSConfig(f.cert, f.key, keyLog)
 		if err != nil {
-			log.Printf("failed to generate TLS config from cert file and key, generating in memory certs: %v", err)
-			tlsConfig = generateTLSConfig()
+			return nil, err
 		}
 		listener, err := quic.ListenAddr(f.addr, tlsConfig, &quic.Config{
 			EnableDatagrams: true,
@@ -196,7 +200,28 @@ func runReceiver(ctx context.Context, f flags, conn quic.Connection) error {
 	}
 }
 
-func generateTLSConfigWithCertAndKey(certFile, keyFile string) (*tls.Config, error) {
+func getSSLKeyLog() (io.WriteCloser, error) {
+	filename := os.Getenv("SSLKEYLOGFILE")
+	if len(filename) == 0 {
+		return nil, nil
+	}
+	f, err := os.Create(filename)
+	if err != nil {
+		return nil, err
+	}
+	return f, nil
+}
+
+func generateTLSConfig(certFile, keyFile string, keyLog io.Writer) (*tls.Config, error) {
+	tlsConfig, err := generateTLSConfigWithCertAndKey(certFile, keyFile, keyLog)
+	if err != nil {
+		log.Printf("failed to generate TLS config from cert file and key, generating in memory certs: %v", err)
+		tlsConfig, err = generateTLSConfigWithNewCert(keyLog)
+	}
+	return tlsConfig, err
+}
+
+func generateTLSConfigWithCertAndKey(certFile, keyFile string, keyLog io.Writer) (*tls.Config, error) {
 	cert, err := tls.LoadX509KeyPair(certFile, keyFile)
 	if err != nil {
 		return nil, err
@@ -204,29 +229,30 @@ func generateTLSConfigWithCertAndKey(certFile, keyFile string) (*tls.Config, err
 	return &tls.Config{
 		Certificates: []tls.Certificate{cert},
 		NextProtos:   []string{"roq-09"},
+		KeyLogWriter: keyLog,
 	}, nil
 }
 
 // Setup a bare-bones TLS config for the server
-func generateTLSConfig() *tls.Config {
+func generateTLSConfigWithNewCert(keyLog io.Writer) (*tls.Config, error) {
 	key, err := rsa.GenerateKey(rand.Reader, 1024)
 	if err != nil {
-		panic(err)
+		return nil, err
 	}
 	template := x509.Certificate{SerialNumber: big.NewInt(1)}
 	certDER, err := x509.CreateCertificate(rand.Reader, &template, &template, &key.PublicKey, key)
 	if err != nil {
-		panic(err)
+		return nil, err
 	}
 	keyPEM := pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(key)})
 	certPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: certDER})
-
 	tlsCert, err := tls.X509KeyPair(certPEM, keyPEM)
 	if err != nil {
-		panic(err)
+		return nil, err
 	}
 	return &tls.Config{
 		Certificates: []tls.Certificate{tlsCert},
 		NextProtos:   []string{"roq-09"},
-	}
+		KeyLogWriter: keyLog,
+	}, nil
 }
