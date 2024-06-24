@@ -47,13 +47,12 @@ func readConfig() flags {
 func parseFlagsFromEnv(testcase string) flags {
 	switch testcase {
 	case "datagrams":
-
 	}
 	return flags{
 		server:      os.Getenv("ENDPOINT") == "server",
 		send:        os.Getenv("ROLE") == "sender",
-		cert:        "",
-		key:         "",
+		cert:        os.Getenv("CERT"),
+		key:         os.Getenv("KEY"),
 		addr:        os.Getenv("ADDR"),
 		destination: "",
 		ffmpeg:      true,
