@@ -13,6 +13,7 @@ import (
 	"math/big"
 	"os"
 	"os/exec"
+	"time"
 
 	"github.com/mengelbart/roq"
 	"github.com/pion/rtp"
@@ -32,7 +33,7 @@ type flags struct {
 }
 
 func main() {
-	setupAndRun(context.Background())
+	setupAndRun()
 }
 
 func readConfig() flags {
@@ -79,24 +80,27 @@ func parseFlags() flags {
 	}
 }
 
-func setupAndRun(ctx context.Context) error {
+func setupAndRun() error {
 	f := readConfig()
-	log.Printf("got config: %v\n", f)
 	keyLog, err := getSSLKeyLog()
 	if err != nil {
 		return err
 	}
+	log.Printf("got config: %v, keylog: %v\n", f, keyLog)
 	if keyLog != nil {
-		defer keyLog.Close()
+		defer func() {
+			log.Printf("closing keylog")
+			keyLog.Close()
+		}()
 	}
-	conn, err := connect(ctx, f, keyLog)
+	conn, err := connect(context.Background(), f, keyLog)
 	if err != nil {
 		return err
 	}
 	if f.send {
-		runSender(ctx, conn)
+		return runSender(conn)
 	}
-	return runReceiver(ctx, f, conn)
+	return runReceiver(f, conn)
 }
 
 func connect(ctx context.Context, f flags, keyLog io.Writer) (quic.Connection, error) {
@@ -121,6 +125,7 @@ func connect(ctx context.Context, f flags, keyLog io.Writer) (quic.Connection, e
 	conn, err := quic.DialAddr(context.Background(), f.addr, &tls.Config{
 		InsecureSkipVerify: true,
 		NextProtos:         []string{"roq-09"},
+		KeyLogWriter:       keyLog,
 	}, &quic.Config{
 		EnableDatagrams: true,
 		Tracer:          qlog.DefaultTracer,
@@ -131,48 +136,56 @@ func connect(ctx context.Context, f flags, keyLog io.Writer) (quic.Connection, e
 	return conn, nil
 }
 
-func runSender(ctx context.Context, conn quic.Connection) error {
+func runSender(conn quic.Connection) error {
 	s, err := newSender(roq.NewQUICGoConnection(conn))
 	if err != nil {
 		return err
 	}
-	ffmpeg := exec.Command("ffmpeg", "-re", "-i", "testsrc.mp4", "-g", "30", "-b:v", "1M", "-f", "ivf", "-")
+	ffmpeg := exec.Command("ffmpeg", "-re", "-f", "lavfi", "-i", "testsrc=duration=3", "-g", "10", "-b:v", "1M", "-f", "ivf", "-")
 	reader, err := ffmpeg.StdoutPipe()
 	if err != nil {
 		return err
 	}
-	go func() {
-		if err := ffmpeg.Run(); err != nil {
-			panic(err)
-		}
-	}()
+	if err = ffmpeg.Start(); err != nil {
+		return err
+	}
 	fr, err := newIVFFrameReader(reader)
 	if err != nil {
 		return err
 	}
 	payloader := &codecs.VP8Payloader{}
 	packetizer := rtp.NewPacketizer(1200, 96, 1, payloader, rtp.NewRandomSequencer(), 90_000)
-	return s.send(ctx, 0, fr, packetizer)
+	err = s.send(0, fr, packetizer)
+	if err != nil {
+		log.Printf("error while sending packets: %v", err)
+		// TODO: Close process gracefully
+		return ffmpeg.Process.Kill()
+	}
+	time.Sleep(time.Second)
+	s.Close()
+	return ffmpeg.Wait()
 }
 
-func runReceiver(ctx context.Context, f flags, conn quic.Connection) error {
+func runReceiver(f flags, conn quic.Connection) error {
 	r, err := newReceiver(roq.NewQUICGoConnection(conn))
 	if err != nil {
 		return err
 	}
-	var writer io.Writer
+	var writer io.WriteCloser
 	if f.ffmpeg {
-		ffmpeg := exec.Command("ffplay", "-v", "debug", "-")
-		ffmpeg.Stdout = os.Stdout
-		ffmpeg.Stderr = os.Stderr
-		stdout, err := ffmpeg.StdinPipe()
+		ffplay := exec.Command("ffplay", "-v", "debug", "-")
+		ffplay.Stdout = os.Stdout
+		ffplay.Stderr = os.Stderr
+		stdout, err := ffplay.StdinPipe()
 		if err != nil {
 			return err
 		}
-		go func() {
-			if err := ffmpeg.Run(); err != nil {
-				panic(err)
-			}
+		if err = ffplay.Start(); err != nil {
+			return err
+		}
+		defer func() {
+			log.Println("WAITING FOR FFPLAY")
+			ffplay.Process.Kill()
 		}()
 		writer, err = newIVFWriterWith(stdout)
 		if err != nil {
@@ -183,21 +196,9 @@ func runReceiver(ctx context.Context, f flags, conn quic.Connection) error {
 		if err != nil {
 			return err
 		}
-		defer fileWriter.Close()
 		writer = fileWriter
 	}
-	errCh := make(chan error)
-	go func() {
-		errCh <- r.receive(0, writer)
-	}()
-	select {
-	case err := <-errCh:
-		return err
-	case <-ctx.Done():
-		err := r.Close()
-		<-errCh
-		return err
-	}
+	return r.receive(0, writer)
 }
 
 func getSSLKeyLog() (io.WriteCloser, error) {
