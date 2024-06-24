@@ -6,6 +6,7 @@ import (
 	"io"
 	"sync"
 
+	"github.com/mengelbart/qlog"
 	"github.com/quic-go/quic-go/quicvarint"
 )
 
@@ -14,6 +15,7 @@ const defaultReceiveBufferSize = 1024 // Number of packets to buffer
 type SendStream interface {
 	io.Writer
 	io.Closer
+	ID() int64
 	CancelWrite(uint64)
 }
 
@@ -45,10 +47,16 @@ type Session struct {
 	wg        sync.WaitGroup
 	ctx       context.Context
 	cancelCtx context.CancelFunc
+
+	qlog *qlog.Logger
 }
 
-func NewSession(conn Connection, acceptDatagrams bool) (*Session, error) {
-	ctx, cancel := context.WithCancel(context.TODO())
+func NewSession(conn Connection, acceptDatagrams bool, qlogWriter io.Writer) (*Session, error) {
+	ctx, cancel := context.WithCancel(context.Background())
+	var qlogger *qlog.Logger
+	if qlogWriter != nil {
+		qlogger = qlog.NewQLOGHandler(qlogWriter, "", "")
+	}
 	s := &Session{
 		receiveBufferSize: defaultReceiveBufferSize,
 		acceptDatagrams:   acceptDatagrams,
@@ -61,6 +69,7 @@ func NewSession(conn Connection, acceptDatagrams bool) (*Session, error) {
 		wg:                sync.WaitGroup{},
 		ctx:               ctx,
 		cancelCtx:         cancel,
+		qlog:              qlogger,
 	}
 	s.start()
 	return s, nil
@@ -95,7 +104,7 @@ func (s *Session) NewSendFlow(id uint64) (*SendFlow, error) {
 	}
 	f := newFlow(s.conn, id, func() {
 		s.sendFlows.delete(id)
-	})
+	}, s.qlog)
 	if err := s.sendFlows.add(id, f); err != nil {
 		return nil, err
 	}
@@ -112,7 +121,7 @@ func (s *Session) NewReceiveFlow(id uint64) (*ReceiveFlow, error) {
 	var f *ReceiveFlow
 	f = s.receiveFlowBuffer.pop(id)
 	if f == nil {
-		f = newReceiveFlow(id, s.receiveBufferSize)
+		f = newReceiveFlow(id, s.receiveBufferSize, s.qlog)
 	}
 	if err := s.receiveFlows.add(id, f); err != nil {
 		return nil, err
@@ -183,13 +192,16 @@ func (s *Session) handleDatagram(packet []byte) {
 		s.closeWithError(ErrRoQPacketError, "invalid flow ID")
 		return
 	}
+	if s.qlog != nil {
+		s.qlog.RoQDatagramPacketCreated(flowID, len(packet)-n)
+	}
 	if f, ok := s.receiveFlows.get(flowID); ok {
 		f.push(packet[quicvarint.Len(flowID):])
 		return
 	}
 	f := s.receiveFlowBuffer.get(flowID)
 	if f == nil {
-		f = newReceiveFlow(flowID, s.receiveBufferSize)
+		f = newReceiveFlow(flowID, s.receiveBufferSize, s.qlog)
 		s.receiveFlowBuffer.add(f)
 	}
 	f.push(packet[n:])
@@ -202,13 +214,16 @@ func (s *Session) handleUniStream(rs ReceiveStream) {
 		s.closeWithError(ErrRoQPacketError, "invalid flow ID")
 		return
 	}
+	if s.qlog != nil {
+		s.qlog.RoQStreamOpened(flowID, rs.ID())
+	}
 	if f, ok := s.receiveFlows.get(flowID); ok {
 		f.readStream(rs)
 		return
 	}
 	f := s.receiveFlowBuffer.get(flowID)
 	if f == nil {
-		f = newReceiveFlow(flowID, s.receiveBufferSize)
+		f = newReceiveFlow(flowID, s.receiveBufferSize, s.qlog)
 		s.receiveFlowBuffer.add(f)
 	}
 	f.readStream(rs)

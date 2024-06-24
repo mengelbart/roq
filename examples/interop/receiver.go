@@ -14,8 +14,8 @@ type receiver struct {
 	session *roq.Session
 }
 
-func newReceiver(conn roq.Connection) (*receiver, error) {
-	session, err := roq.NewSession(conn, true)
+func newReceiver(conn roq.Connection, qlog io.Writer) (*receiver, error) {
+	session, err := roq.NewSession(conn, true, qlog)
 	if err != nil {
 		return nil, err
 	}

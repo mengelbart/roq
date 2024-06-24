@@ -26,6 +26,10 @@ type quicGoSendStream struct {
 	stream quic.SendStream
 }
 
+func (s *quicGoSendStream) ID() int64 {
+	return int64(s.stream.StreamID())
+}
+
 func (s *quicGoSendStream) Write(b []byte) (int, error) {
 	return s.stream.Write(b)
 }

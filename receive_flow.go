@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/mengelbart/qlog"
 	"github.com/quic-go/quic-go/quicvarint"
 )
 
@@ -18,9 +19,10 @@ type ReceiveFlow struct {
 	cancelCtx context.CancelFunc
 	lock      sync.Mutex
 	streams   map[int64]ReceiveStream
+	qlog      *qlog.Logger
 }
 
-func newReceiveFlow(id uint64, receiveBufferSize int) *ReceiveFlow {
+func newReceiveFlow(id uint64, receiveBufferSize int, qlog *qlog.Logger) *ReceiveFlow {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &ReceiveFlow{
 		id:        id,
@@ -29,6 +31,7 @@ func newReceiveFlow(id uint64, receiveBufferSize int) *ReceiveFlow {
 		cancelCtx: cancel,
 		lock:      sync.Mutex{},
 		streams:   map[int64]ReceiveStream{},
+		qlog:      qlog,
 	}
 }
 
@@ -66,6 +69,9 @@ func (f *ReceiveFlow) readStream(rs ReceiveStream) {
 		if err != nil {
 			log.Printf("got unexpected error while reading length: %v", err)
 			return
+		}
+		if f.qlog != nil {
+			f.qlog.RoQStreamPacketParsed(f.id, rs.ID(), int(length))
 		}
 		f.push(buf[:n])
 	}
