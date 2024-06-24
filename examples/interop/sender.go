@@ -1,7 +1,7 @@
 package main
 
 import (
-	"context"
+	"io"
 	"log"
 
 	"github.com/mengelbart/roq"
@@ -26,7 +26,7 @@ func newSender(conn roq.Connection) (*sender, error) {
 	}, err
 }
 
-func (s *sender) send(ctx context.Context, flowID uint64, reader FrameReader, packetizer rtp.Packetizer) error {
+func (s *sender) send(flowID uint64, reader FrameReader, packetizer rtp.Packetizer) error {
 	flow, err := s.session.NewSendFlow(flowID)
 	if err != nil {
 		return err
@@ -35,6 +35,9 @@ func (s *sender) send(ctx context.Context, flowID uint64, reader FrameReader, pa
 	for {
 		frame, err := reader.Read()
 		if err != nil {
+			if err == io.EOF {
+				return nil
+			}
 			return err
 		}
 		log.Printf("sending frame of size %v", len(frame))

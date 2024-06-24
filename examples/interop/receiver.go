@@ -24,12 +24,13 @@ func newReceiver(conn roq.Connection) (*receiver, error) {
 	}, err
 }
 
-func (r *receiver) receive(flowID uint64, writer io.Writer) error {
+func (r *receiver) receive(flowID uint64, writer io.WriteCloser) error {
 	flow, err := r.session.NewReceiveFlow(flowID)
 	if err != nil {
 		return err
 	}
 	defer flow.Close()
+	defer writer.Close()
 	buf := make([]byte, bufferSize)
 	for {
 		n, err := flow.Read(buf)

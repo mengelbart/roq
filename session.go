@@ -34,27 +34,33 @@ type Connection interface {
 type Session struct {
 	receiveBufferSize int
 	acceptDatagrams   bool
+
 	conn              Connection
-	ctx               context.Context
-	cancelCtx         context.CancelCauseFunc
-	wg                sync.WaitGroup
 	sendFlows         *syncMap[uint64, *SendFlow]
 	receiveFlows      *syncMap[uint64, *ReceiveFlow]
 	receiveFlowBuffer *receiveFlowBuffer
+
+	mutex     sync.Mutex
+	closedErr error
+	wg        sync.WaitGroup
+	ctx       context.Context
+	cancelCtx context.CancelFunc
 }
 
 func NewSession(conn Connection, acceptDatagrams bool) (*Session, error) {
-	ctx, cancel := context.WithCancelCause(context.Background())
+	ctx, cancel := context.WithCancel(context.TODO())
 	s := &Session{
 		receiveBufferSize: defaultReceiveBufferSize,
 		acceptDatagrams:   acceptDatagrams,
 		conn:              conn,
-		ctx:               ctx,
-		cancelCtx:         cancel,
-		wg:                sync.WaitGroup{},
 		sendFlows:         newSyncMap[uint64, *SendFlow](),
 		receiveFlows:      newSyncMap[uint64, *ReceiveFlow](),
 		receiveFlowBuffer: newReceiveFlowBuffer(16),
+		mutex:             sync.Mutex{},
+		closedErr:         nil,
+		wg:                sync.WaitGroup{},
+		ctx:               ctx,
+		cancelCtx:         cancel,
 	}
 	s.start()
 	return s, nil
@@ -66,7 +72,7 @@ func (s *Session) start() {
 		go func() {
 			defer s.wg.Done()
 			if err := s.receiveDatagrams(); err != nil {
-				s.Close()
+				return
 			}
 		}()
 	}
@@ -75,7 +81,7 @@ func (s *Session) start() {
 	go func() {
 		defer s.wg.Done()
 		if err := s.receiveUniStreams(); err != nil {
-			s.Close()
+			return
 		}
 	}()
 }
@@ -114,36 +120,38 @@ func (s *Session) NewReceiveFlow(id uint64) (*ReceiveFlow, error) {
 	return f, nil
 }
 
-func (s *Session) isClosed() error {
-	select {
-	case <-s.ctx.Done():
-		return s.ctx.Err()
-	default:
-		return nil
-	}
-}
-
 func (s *Session) close(code uint64, reason string) {
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
 	s.sendFlows.rangeFn(func(_ uint64, v *SendFlow) { v.Close() })
 	s.receiveFlows.rangeFn(func(_ uint64, v *ReceiveFlow) { v.Close() })
 	_ = s.conn.CloseWithError(code, reason)
+	s.closedErr = SessionError{
+		code:   code,
+		reason: reason,
+	}
+	s.cancelCtx()
 	s.wg.Wait()
 }
 
+func (s *Session) isClosed() error {
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+	return s.closedErr
+}
+
 func (s *Session) closeWithError(code uint64, reason string) {
-	s.cancelCtx(errors.New(reason))
 	s.close(code, reason)
 }
 
 func (s *Session) Close() error {
-	s.cancelCtx(nil)
 	s.close(ErrRoQNoError, "")
 	return nil
 }
 
 func (s *Session) receiveUniStreams() error {
 	for {
-		rs, err := s.conn.AcceptUniStream(context.TODO())
+		rs, err := s.conn.AcceptUniStream(s.ctx)
 		if err != nil {
 			return err
 		}
@@ -157,7 +165,7 @@ func (s *Session) receiveUniStreams() error {
 
 func (s *Session) receiveDatagrams() error {
 	for {
-		dgram, err := s.conn.ReceiveDatagram(context.TODO())
+		dgram, err := s.conn.ReceiveDatagram(s.ctx)
 		if err != nil {
 			return err
 		}

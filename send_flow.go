@@ -8,29 +8,26 @@ import (
 )
 
 type SendFlow struct {
-	lock    sync.Mutex
-	id      uint64
-	conn    Connection
-	flowID  []byte
-	streams []*RTPSendStream
-	ctx     context.Context
-	cancel  context.CancelFunc
-	onClose func()
+	lock      sync.Mutex
+	id        uint64
+	conn      Connection
+	flowID    []byte
+	streams   []*RTPSendStream
+	onClose   func()
+	closedErr error
 }
 
 func newFlow(conn Connection, id uint64, onClose func()) *SendFlow {
 	flowID := make([]byte, 0, quicvarint.Len(id))
 	flowID = quicvarint.Append(flowID, id)
-	ctx, cancel := context.WithCancel(context.Background())
 	return &SendFlow{
-		lock:    sync.Mutex{},
-		id:      id,
-		conn:    conn,
-		flowID:  flowID,
-		streams: []*RTPSendStream{},
-		ctx:     ctx,
-		cancel:  cancel,
-		onClose: onClose,
+		lock:      sync.Mutex{},
+		id:        id,
+		conn:      conn,
+		flowID:    flowID,
+		streams:   []*RTPSendStream{},
+		onClose:   onClose,
+		closedErr: nil,
 	}
 }
 
@@ -66,17 +63,13 @@ func (f *SendFlow) NewSendStream(ctx context.Context) (*RTPSendStream, error) {
 }
 
 func (f *SendFlow) isClosed() error {
-	select {
-	case <-f.ctx.Done():
-		return f.ctx.Err()
-	default:
-		return nil
-	}
+	f.lock.Lock()
+	defer f.lock.Unlock()
+	return f.closedErr
 }
 
 // Close closes the flow and all associated streams.
 func (f *SendFlow) Close() error {
-	f.cancel()
 	f.lock.Lock()
 	defer f.lock.Unlock()
 	for _, s := range f.streams {
@@ -85,5 +78,6 @@ func (f *SendFlow) Close() error {
 		}
 	}
 	f.onClose()
+	f.closedErr = errClosed
 	return nil
 }
