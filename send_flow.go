@@ -4,6 +4,7 @@ import (
 	"context"
 	"sync"
 
+	"github.com/mengelbart/qlog"
 	"github.com/quic-go/quic-go/quicvarint"
 )
 
@@ -15,9 +16,10 @@ type SendFlow struct {
 	streams   []*RTPSendStream
 	onClose   func()
 	closedErr error
+	qlog      *qlog.Logger
 }
 
-func newFlow(conn Connection, id uint64, onClose func()) *SendFlow {
+func newFlow(conn Connection, id uint64, onClose func(), qlog *qlog.Logger) *SendFlow {
 	flowID := make([]byte, 0, quicvarint.Len(id))
 	flowID = quicvarint.Append(flowID, id)
 	return &SendFlow{
@@ -28,6 +30,7 @@ func newFlow(conn Connection, id uint64, onClose func()) *SendFlow {
 		streams:   []*RTPSendStream{},
 		onClose:   onClose,
 		closedErr: nil,
+		qlog:      qlog,
 	}
 }
 
@@ -39,6 +42,9 @@ func (f *SendFlow) WriteRTPBytes(packet []byte) error {
 	buf := make([]byte, 0, len(f.flowID)+len(packet))
 	buf = append(buf, f.flowID...)
 	buf = append(buf, packet...)
+	if f.qlog != nil {
+		f.qlog.RoQDatagramPacketCreated(f.id, len(packet))
+	}
 	return f.conn.SendDatagram(buf)
 }
 
@@ -52,9 +58,15 @@ func (f *SendFlow) NewSendStream(ctx context.Context) (*RTPSendStream, error) {
 	if err != nil {
 		return nil, err
 	}
-	stream, err := newRTPSendStream(s, f.flowID)
+	if _, err := s.Write(f.flowID); err != nil {
+		return nil, err
+	}
+	stream, err := newRTPSendStream(s, f.id, f.qlog)
 	if err != nil {
 		return nil, err
+	}
+	if f.qlog != nil {
+		f.qlog.RoQStreamOpened(f.id, s.ID())
 	}
 	f.lock.Lock()
 	defer f.lock.Unlock()

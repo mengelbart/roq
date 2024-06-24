@@ -77,7 +77,7 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-	session, err := roq.NewSession(roq.NewQUICGoConnection(conn), true)
+	session, err := roq.NewSession(roq.NewQUICGoConnection(conn), true, nil)
 	if err != nil {
 		panic(err)
 	}

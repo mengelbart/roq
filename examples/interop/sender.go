@@ -2,7 +2,6 @@ package main
 
 import (
 	"io"
-	"log"
 
 	"github.com/mengelbart/roq"
 	"github.com/pion/rtp"
@@ -16,8 +15,8 @@ type sender struct {
 	session *roq.Session
 }
 
-func newSender(conn roq.Connection) (*sender, error) {
-	session, err := roq.NewSession(conn, true)
+func newSender(conn roq.Connection, qlog io.Writer) (*sender, error) {
+	session, err := roq.NewSession(conn, true, qlog)
 	if err != nil {
 		return nil, err
 	}
@@ -40,14 +39,12 @@ func (s *sender) send(flowID uint64, reader FrameReader, packetizer rtp.Packetiz
 			}
 			return err
 		}
-		log.Printf("sending frame of size %v", len(frame))
 		packets := packetizer.Packetize(frame, 1)
 		//stream, err := flow.NewSendStream(ctx)
 		if err != nil {
 			return err
 		}
 		for _, pkt := range packets {
-			log.Printf("sending packet: %v", pkt)
 			buf, err := pkt.Marshal()
 			if err != nil {
 				return err

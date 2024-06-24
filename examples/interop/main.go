@@ -8,11 +8,13 @@ import (
 	"crypto/x509"
 	"encoding/pem"
 	"flag"
+	"fmt"
 	"io"
 	"log"
 	"math/big"
 	"os"
 	"os/exec"
+	"strings"
 	"time"
 
 	"github.com/mengelbart/roq"
@@ -54,8 +56,8 @@ func parseFlagsFromEnv(testcase string) flags {
 		cert:        os.Getenv("CERT"),
 		key:         os.Getenv("KEY"),
 		addr:        os.Getenv("ADDR"),
-		destination: "",
-		ffmpeg:      true,
+		destination: os.Getenv("DESTINATION"),
+		ffmpeg:      len(os.Getenv("FFMPEG")) > 0,
 	}
 }
 
@@ -97,7 +99,7 @@ func setupAndRun() error {
 		return err
 	}
 	if f.send {
-		return runSender(conn)
+		return runSender(f, conn)
 	}
 	return runReceiver(f, conn)
 }
@@ -135,12 +137,20 @@ func connect(ctx context.Context, f flags, keyLog io.Writer) (quic.Connection, e
 	return conn, nil
 }
 
-func runSender(conn quic.Connection) error {
-	s, err := newSender(roq.NewQUICGoConnection(conn))
+func runSender(f flags, conn quic.Connection) error {
+	role := "server"
+	if !f.server {
+		role = "client"
+	}
+	qlog := getQLOGWriter("roq", role)
+	if qlog != nil {
+		defer qlog.Close()
+	}
+	s, err := newSender(roq.NewQUICGoConnection(conn), qlog)
 	if err != nil {
 		return err
 	}
-	ffmpeg := exec.Command("ffmpeg", "-re", "-f", "lavfi", "-i", "testsrc=duration=3", "-g", "10", "-b:v", "1M", "-f", "ivf", "-")
+	ffmpeg := exec.Command("ffmpeg", "-v", "debug", "-re", "-f", "lavfi", "-i", "testsrc=duration=10", "-g", "30", "-b:v", "1M", "-f", "ivf", "-")
 	reader, err := ffmpeg.StdoutPipe()
 	if err != nil {
 		return err
@@ -166,7 +176,15 @@ func runSender(conn quic.Connection) error {
 }
 
 func runReceiver(f flags, conn quic.Connection) error {
-	r, err := newReceiver(roq.NewQUICGoConnection(conn))
+	role := "client"
+	if f.server {
+		role = "server"
+	}
+	qlog := getQLOGWriter("roq", role)
+	if qlog != nil {
+		defer qlog.Close()
+	}
+	r, err := newReceiver(roq.NewQUICGoConnection(conn), qlog)
 	if err != nil {
 		return err
 	}
@@ -255,4 +273,23 @@ func generateTLSConfigWithNewCert(keyLog io.Writer) (*tls.Config, error) {
 		NextProtos:   []string{"roq-09"},
 		KeyLogWriter: keyLog,
 	}, nil
+}
+
+func getQLOGWriter(id, label string) io.WriteCloser {
+	qlogDir := os.Getenv("QLOGDIR")
+	if qlogDir == "" {
+		return nil
+	}
+	if _, err := os.Stat(qlogDir); os.IsNotExist(err) {
+		if err := os.MkdirAll(qlogDir, 0o755); err != nil {
+			log.Fatalf("failed to create qlog dir %s: %v", qlogDir, err)
+		}
+	}
+	path := fmt.Sprintf("%s/%s_%s.qlog", strings.TrimRight(qlogDir, "/"), id, label)
+	f, err := os.Create(path)
+	if err != nil {
+		log.Printf("Failed to create qlog file %s: %s", path, err.Error())
+		return nil
+	}
+	return f
 }

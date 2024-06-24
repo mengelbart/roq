@@ -1,21 +1,21 @@
 package roq
 
 import (
+	"github.com/mengelbart/qlog"
 	"github.com/quic-go/quic-go/quicvarint"
 )
 
 type RTPSendStream struct {
 	stream SendStream
-	flowID []byte
+	flowID uint64
+	qlog   *qlog.Logger
 }
 
-func newRTPSendStream(stream SendStream, flowID []byte) (*RTPSendStream, error) {
-	if _, err := stream.Write(flowID); err != nil {
-		return nil, err
-	}
+func newRTPSendStream(stream SendStream, flowID uint64, qlog *qlog.Logger) (*RTPSendStream, error) {
 	return &RTPSendStream{
 		stream: stream,
 		flowID: flowID,
+		qlog:   qlog,
 	}, nil
 }
 
@@ -26,6 +26,9 @@ func (s *RTPSendStream) WriteRTPBytes(packet []byte) (int, error) {
 	buf = quicvarint.Append(buf, uint64(len(packet)))
 	buf = append(buf, packet...)
 	_, err := s.stream.Write(buf)
+	if s.qlog != nil {
+		s.qlog.RoQStreamPacketCreated(s.flowID, s.stream.ID(), len(packet))
+	}
 	return len(packet), err
 }
 

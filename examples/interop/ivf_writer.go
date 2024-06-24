@@ -64,11 +64,9 @@ func (w *ivfWriter) Write(buf []byte) (int, error) {
 	w.buffer.Push(pkt)
 	p, err := w.buffer.Pop()
 	if err != nil {
-		log.Printf("jitterbuffer error: %v", err)
 		return len(buf), nil
 	}
 	if p != nil {
-		log.Printf("received packet %v", p)
 		err = w.writer.WriteRTP(p)
 		if err != nil {
 			return len(buf), err
