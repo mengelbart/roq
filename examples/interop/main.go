@@ -32,10 +32,14 @@ type flags struct {
 	addr        string
 	destination string
 	ffmpeg      bool
+	codec       string
 }
 
 func main() {
-	setupAndRun()
+	if err := setupAndRun(); err != nil {
+		log.Fatal(err)
+	}
+	log.Println("BYE")
 }
 
 func readConfig() flags {
@@ -58,6 +62,7 @@ func parseFlagsFromEnv(testcase string) flags {
 		addr:        os.Getenv("ADDR"),
 		destination: os.Getenv("DESTINATION"),
 		ffmpeg:      len(os.Getenv("FFMPEG")) > 0,
+		codec:       os.Getenv("CODEC"),
 	}
 }
 
@@ -69,6 +74,7 @@ func parseFlags() flags {
 	addr := flag.String("addr", "localhost:8080", "listen address")
 	destination := flag.String("destination", "out.ivf", "output file of receiver, only if ffmpeg=false")
 	ffmpeg := flag.Bool("ffmpeg", false, "use ffmpeg instead of files for io")
+	codec := flag.String("codec", "vp8", "codec: vp8 or h264")
 	flag.Parse()
 	return flags{
 		server:      *server,
@@ -78,6 +84,7 @@ func parseFlags() flags {
 		addr:        *addr,
 		destination: *destination,
 		ffmpeg:      *ffmpeg,
+		codec:       *codec,
 	}
 }
 
@@ -202,14 +209,16 @@ func runReceiver(f flags, conn quic.Connection) error {
 		}
 		defer func() {
 			log.Println("WAITING FOR FFPLAY")
+			//state, err := ffplay.Process.Wait()
+			//log.Printf("ffmpeg returned %v, err: %v", state, err)
 			ffplay.Process.Kill()
 		}()
-		writer, err = newIVFWriterWith(stdout)
+		writer, err = newIVFWriterWith(stdout, f.codec)
 		if err != nil {
 			return err
 		}
 	} else {
-		fileWriter, err := newIVFWriter(f.destination)
+		fileWriter, err := newFileWriter(f.destination, f.codec)
 		if err != nil {
 			return err
 		}
