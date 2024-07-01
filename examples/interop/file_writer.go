@@ -7,21 +7,37 @@ import (
 
 	"github.com/pion/interceptor/pkg/jitterbuffer"
 	"github.com/pion/rtp"
+	"github.com/pion/webrtc/v3/pkg/media/h264writer"
 	"github.com/pion/webrtc/v3/pkg/media/ivfwriter"
 )
 
-type ivfWriter struct {
-	buffer *jitterbuffer.JitterBuffer
-	writer *ivfwriter.IVFWriter
+type rtpWriter interface {
+	WriteRTP(*rtp.Packet) error
+	Close() error
 }
 
-func newIVFWriter(filename string) (*ivfWriter, error) {
-	w, err := ivfwriter.New(filename)
+type fileWriter struct {
+	buffer *jitterbuffer.JitterBuffer
+	writer rtpWriter
+}
+
+func newFileWriter(filename string, codec string) (*fileWriter, error) {
+	var w rtpWriter
+	var err error
+
+	switch codec {
+	case "vp8":
+		w, err = ivfwriter.New(filename)
+	case "h264":
+		w, err = h264writer.New(filename)
+	default:
+		return nil, errors.New("unknown codec")
+	}
 	if err != nil {
 		return nil, err
 	}
 	jb := jitterbuffer.New()
-	return &ivfWriter{
+	return &fileWriter{
 		buffer: jb,
 		writer: w,
 	}, nil
@@ -36,22 +52,32 @@ func (w *wrapper) Write(buf []byte) (int, error) {
 	return w.w.Write(buf)
 }
 
-func newIVFWriterWith(writer io.Writer) (*ivfWriter, error) {
+func newIVFWriterWith(writer io.Writer, codec string) (*fileWriter, error) {
+	var w rtpWriter
+	var err error
 	wr := &wrapper{
 		w: writer,
 	}
-	w, err := ivfwriter.NewWith(wr)
+
+	switch codec {
+	case "vp8":
+		w, err = ivfwriter.NewWith(wr)
+	case "h264":
+		w = h264writer.NewWith(wr)
+	default:
+		return nil, errors.New("unknown codec")
+	}
 	if err != nil {
 		return nil, err
 	}
 	jb := jitterbuffer.New()
-	return &ivfWriter{
+	return &fileWriter{
 		buffer: jb,
 		writer: w,
 	}, nil
 }
 
-func (w *ivfWriter) Write(buf []byte) (int, error) {
+func (w *fileWriter) Write(buf []byte) (int, error) {
 	c := make([]byte, len(buf))
 	n := copy(c, buf)
 	if n != len(buf) {
@@ -77,6 +103,6 @@ func (w *ivfWriter) Write(buf []byte) (int, error) {
 	return len(buf), nil
 }
 
-func (w *ivfWriter) Close() error {
+func (w *fileWriter) Close() error {
 	return w.writer.Close()
 }
