@@ -33,6 +33,7 @@ type flags struct {
 	destination string
 	ffmpeg      bool
 	codec       string
+	datagrams   bool
 }
 
 func main() {
@@ -50,10 +51,7 @@ func readConfig() flags {
 	return parseFlags()
 }
 
-func parseFlagsFromEnv(testcase string) flags {
-	switch testcase {
-	case "datagrams":
-	}
+func parseFlagsFromEnv(_ string) flags {
 	return flags{
 		server:      os.Getenv("ENDPOINT") == "server",
 		send:        os.Getenv("ROLE") == "sender",
@@ -63,6 +61,7 @@ func parseFlagsFromEnv(testcase string) flags {
 		destination: os.Getenv("DESTINATION"),
 		ffmpeg:      len(os.Getenv("FFMPEG")) > 0,
 		codec:       os.Getenv("CODEC"),
+		datagrams:   os.Getenv("DATAGRAMS") == "TRUE",
 	}
 }
 
@@ -75,6 +74,7 @@ func parseFlags() flags {
 	destination := flag.String("destination", "out.ivf", "output file of receiver, only if ffmpeg=false")
 	ffmpeg := flag.Bool("ffmpeg", false, "use ffmpeg instead of files for io")
 	codec := flag.String("codec", "vp8", "codec: vp8 or h264")
+	datagrams := flag.Bool("datagrams", false, "send datagrams instead of streams")
 	flag.Parse()
 	return flags{
 		server:      *server,
@@ -85,6 +85,7 @@ func parseFlags() flags {
 		destination: *destination,
 		ffmpeg:      *ffmpeg,
 		codec:       *codec,
+		datagrams:   *datagrams,
 	}
 }
 
@@ -114,6 +115,7 @@ func setupAndRun() error {
 func connect(ctx context.Context, f flags, keyLog io.Writer) (quic.Connection, error) {
 	if f.server {
 		tlsConfig, err := generateTLSConfig(f.cert, f.key, keyLog)
+		tlsConfig.InsecureSkipVerify = true
 		if err != nil {
 			return nil, err
 		}
@@ -153,7 +155,7 @@ func runSender(f flags, conn quic.Connection) error {
 	if qlog != nil {
 		defer qlog.Close()
 	}
-	s, err := newSender(roq.NewQUICGoConnection(conn), qlog)
+	s, err := newSender(roq.NewQUICGoConnection(conn), qlog, f.datagrams)
 	if err != nil {
 		return err
 	}
