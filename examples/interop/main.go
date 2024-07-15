@@ -17,6 +17,7 @@ import (
 	"strings"
 	"time"
 
+	mqlog "github.com/mengelbart/qlog"
 	"github.com/mengelbart/roq"
 	"github.com/pion/rtp"
 	"github.com/pion/rtp/codecs"
@@ -151,11 +152,12 @@ func runSender(f flags, conn quic.Connection) error {
 	if !f.server {
 		role = "client"
 	}
-	qlog := getQLOGWriter("roq", role)
-	if qlog != nil {
-		defer qlog.Close()
+	qlogfile := getQLOGWriter("roq", role)
+	if qlogfile != nil {
+		defer qlogfile.Close()
 	}
-	s, err := newSender(roq.NewQUICGoConnection(conn), qlog, f.datagrams)
+	qlogger := mqlog.NewQLOGHandler(qlogfile, "roq qlog", role)
+	s, err := newSender(roq.NewQUICGoConnection(conn), qlogger, f.datagrams)
 	if err != nil {
 		return err
 	}
@@ -189,11 +191,12 @@ func runReceiver(f flags, conn quic.Connection) error {
 	if f.server {
 		role = "server"
 	}
-	qlog := getQLOGWriter("roq", role)
-	if qlog != nil {
-		defer qlog.Close()
+	qlogfile := getQLOGWriter("roq", role)
+	if qlogfile != nil {
+		defer qlogfile.Close()
 	}
-	r, err := newReceiver(roq.NewQUICGoConnection(conn), qlog)
+	qlogger := mqlog.NewQLOGHandler(qlogfile, "roq qlog", role)
+	r, err := newReceiver(roq.NewQUICGoConnection(conn), qlogger)
 	if err != nil {
 		return err
 	}
@@ -286,7 +289,7 @@ func generateTLSConfigWithNewCert(keyLog io.Writer) (*tls.Config, error) {
 	}, nil
 }
 
-func getQLOGWriter(id, label string) io.WriteCloser {
+func getQLOGWriter(id, vantagePoint string) io.WriteCloser {
 	qlogDir := os.Getenv("QLOGDIR")
 	if qlogDir == "" {
 		return nil
@@ -296,7 +299,7 @@ func getQLOGWriter(id, label string) io.WriteCloser {
 			log.Fatalf("failed to create qlog dir %s: %v", qlogDir, err)
 		}
 	}
-	path := fmt.Sprintf("%s/%s_%s.qlog", strings.TrimRight(qlogDir, "/"), id, label)
+	path := fmt.Sprintf("%s/%s_%s.qlog", strings.TrimRight(qlogDir, "/"), id, vantagePoint)
 	f, err := os.Create(path)
 	if err != nil {
 		log.Printf("Failed to create qlog file %s: %s", path, err.Error())

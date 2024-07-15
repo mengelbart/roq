@@ -3,6 +3,7 @@ package main
 import (
 	"io"
 
+	"github.com/mengelbart/qlog"
 	"github.com/mengelbart/roq"
 )
 
@@ -14,7 +15,7 @@ type receiver struct {
 	session *roq.Session
 }
 
-func newReceiver(conn roq.Connection, qlog io.Writer) (*receiver, error) {
+func newReceiver(conn roq.Connection, qlog *qlog.Logger) (*receiver, error) {
 	session, err := roq.NewSession(conn, true, qlog)
 	if err != nil {
 		return nil, err

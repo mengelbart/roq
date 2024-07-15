@@ -51,12 +51,8 @@ type Session struct {
 	qlog *qlog.Logger
 }
 
-func NewSession(conn Connection, acceptDatagrams bool, qlogWriter io.Writer) (*Session, error) {
+func NewSession(conn Connection, acceptDatagrams bool, qlogger *qlog.Logger) (*Session, error) {
 	ctx, cancel := context.WithCancel(context.Background())
-	var qlogger *qlog.Logger
-	if qlogWriter != nil {
-		qlogger = qlog.NewQLOGHandler(qlogWriter, "", "")
-	}
 	s := &Session{
 		receiveBufferSize: defaultReceiveBufferSize,
 		acceptDatagrams:   acceptDatagrams,
