@@ -174,25 +174,21 @@ func (s *Session) receiveDatagrams() error {
 		if err != nil {
 			return err
 		}
-		s.wg.Add(1)
-		go func() {
-			defer s.wg.Done()
-			s.handleDatagram(dgram)
-		}()
+		s.handleDatagram(dgram)
 	}
 }
 
-func (s *Session) handleDatagram(packet []byte) {
-	flowID, n, err := quicvarint.Parse(packet)
+func (s *Session) handleDatagram(datagram []byte) {
+	flowID, n, err := quicvarint.Parse(datagram)
 	if err != nil {
 		s.closeWithError(ErrRoQPacketError, "invalid flow ID")
 		return
 	}
 	if s.qlog != nil {
-		s.qlog.RoQDatagramPacketCreated(flowID, len(packet)-n)
+		s.qlog.RoQDatagramPacketParsed(flowID, len(datagram)-n)
 	}
 	if f, ok := s.receiveFlows.get(flowID); ok {
-		f.push(packet[quicvarint.Len(flowID):])
+		f.push(datagram[quicvarint.Len(flowID):])
 		return
 	}
 	f := s.receiveFlowBuffer.get(flowID)
@@ -200,7 +196,7 @@ func (s *Session) handleDatagram(packet []byte) {
 		f = newReceiveFlow(flowID, s.receiveBufferSize, s.qlog)
 		s.receiveFlowBuffer.add(f)
 	}
-	f.push(packet[n:])
+	f.push(datagram[n:])
 }
 
 func (s *Session) handleUniStream(rs ReceiveStream) {
