@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"crypto/rand"
 	"crypto/rsa"
@@ -22,6 +23,7 @@ import (
 	"github.com/pion/rtp"
 	"github.com/pion/rtp/codecs"
 	"github.com/quic-go/quic-go"
+	"github.com/quic-go/quic-go/logging"
 	"github.com/quic-go/quic-go/qlog"
 )
 
@@ -122,7 +124,7 @@ func connect(ctx context.Context, f flags, keyLog io.Writer) (quic.Connection, e
 		}
 		listener, err := quic.ListenAddr(f.addr, tlsConfig, &quic.Config{
 			EnableDatagrams: true,
-			Tracer:          qlog.DefaultTracer,
+			Tracer:          qlogTracer,
 		})
 		if err != nil {
 			return nil, err
@@ -139,7 +141,7 @@ func connect(ctx context.Context, f flags, keyLog io.Writer) (quic.Connection, e
 		KeyLogWriter:       keyLog,
 	}, &quic.Config{
 		EnableDatagrams: true,
-		Tracer:          qlog.DefaultTracer,
+		Tracer:          qlogTracer,
 	})
 	if err != nil {
 		return nil, err
@@ -312,4 +314,58 @@ func getQLOGWriter(id, vantagePoint string) io.WriteCloser {
 		return nil
 	}
 	return f
+}
+
+func qlogTracer(_ context.Context, p logging.Perspective, connID logging.ConnectionID) *logging.ConnectionTracer {
+	var label string
+	switch p {
+	case logging.PerspectiveClient:
+		label = "client"
+	case logging.PerspectiveServer:
+		label = "server"
+	}
+	return qlogDirTracer(p, connID, label)
+}
+
+func qlogDirTracer(p logging.Perspective, connID logging.ConnectionID, label string) *logging.ConnectionTracer {
+	qlogDir := os.Getenv("QLOGDIR")
+	if qlogDir == "" {
+		return nil
+	}
+	if _, err := os.Stat(qlogDir); os.IsNotExist(err) {
+		if err := os.MkdirAll(qlogDir, 0o755); err != nil {
+			log.Fatalf("failed to create qlog dir %s: %v", qlogDir, err)
+		}
+	}
+	path := fmt.Sprintf("%s/%s_%s.qlog", strings.TrimRight(qlogDir, "/"), connID, label)
+	f, err := os.Create(path)
+	if err != nil {
+		log.Printf("Failed to create qlog file %s: %s", path, err.Error())
+		return nil
+	}
+	return qlog.NewConnectionTracer(NewBufferedWriteCloser(bufio.NewWriter(f), f), p, connID)
+}
+
+type bufferedWriteCloser struct {
+	*bufio.Writer
+	io.Closer
+}
+
+// NewBufferedWriteCloser creates an io.WriteCloser from a bufio.Writer and an io.Closer
+func NewBufferedWriteCloser(writer *bufio.Writer, closer io.Closer) io.WriteCloser {
+	return &bufferedWriteCloser{
+		Writer: writer,
+		Closer: closer,
+	}
+}
+
+func (h bufferedWriteCloser) Write(p []byte) (int, error) {
+	return h.Writer.Write(append([]byte{'\u001e'}, p...))
+}
+
+func (h bufferedWriteCloser) Close() error {
+	if err := h.Writer.Flush(); err != nil {
+		return err
+	}
+	return h.Closer.Close()
 }
