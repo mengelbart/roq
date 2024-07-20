@@ -48,8 +48,8 @@ func main() {
 		panic(err)
 	}
 	defer fileWriter.Close()
-	buf := make([]byte, 4096)
 	for {
+		buf := make([]byte, 4096)
 		n, err := flow.Read(buf)
 		if err != nil {
 			log.Println(err)
