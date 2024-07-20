@@ -20,6 +20,10 @@ import (
 	"github.com/quic-go/quic-go/qlog"
 )
 
+const (
+	clockRate = 90_000
+)
+
 func main() {
 	videoFileName := flag.String("file", "output.ivf", "IVF video file to read")
 	addr := flag.String("addr", "localhost:4443", "address to connect and send video to")
@@ -49,7 +53,7 @@ func main() {
 	}
 	log.Printf("got payloader: %T", payloader)
 
-	packetizer := rtp.NewPacketizer(1200, 96, 1, payloader, rtp.NewRandomSequencer(), 90_000)
+	packetizer := rtp.NewPacketizer(1200, 96, 1, payloader, rtp.NewRandomSequencer(), clockRate)
 
 	file, ivfErr := os.Open(*videoFileName)
 	if ivfErr != nil {
@@ -87,8 +91,9 @@ func main() {
 		panic(err)
 	}
 
-	ticker := time.NewTicker(time.Millisecond * time.Duration((float32(header.TimebaseNumerator)/float32(header.TimebaseDenominator))*1000))
-	for ; true; <-ticker.C {
+	sampleDuration := time.Millisecond * time.Duration((float32(header.TimebaseNumerator)/float32(header.TimebaseDenominator))*1000)
+	ticker := time.NewTicker(sampleDuration)
+	for range ticker.C {
 		frame, _, ivfErr := ivf.ParseNextFrame()
 		if errors.Is(ivfErr, io.EOF) {
 			fmt.Printf("All video frames parsed and sent")
@@ -103,7 +108,8 @@ func main() {
 		if err != nil {
 			panic(err)
 		}
-		packets := packetizer.Packetize(frame, 1)
+		samples := uint32(sampleDuration.Seconds() * clockRate)
+		packets := packetizer.Packetize(frame, samples)
 		for _, pkt := range packets {
 			buf, err := pkt.Marshal()
 			if err != nil {
