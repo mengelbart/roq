@@ -156,7 +156,10 @@ func runSender(f flags, conn quic.Connection) error {
 	if qlogfile != nil {
 		defer qlogfile.Close()
 	}
-	qlogger := mqlog.NewQLOGHandler(qlogfile, "roq qlog", role)
+	var qlogger *mqlog.Logger
+	if qlogfile != nil {
+		qlogger = mqlog.NewQLOGHandler(qlogfile, "roq qlog", role)
+	}
 	s, err := newSender(roq.NewQUICGoConnection(conn), qlogger, f.datagrams)
 	if err != nil {
 		return err
@@ -195,7 +198,10 @@ func runReceiver(f flags, conn quic.Connection) error {
 	if qlogfile != nil {
 		defer qlogfile.Close()
 	}
-	qlogger := mqlog.NewQLOGHandler(qlogfile, "roq qlog", role)
+	var qlogger *mqlog.Logger
+	if qlogfile != nil {
+		qlogger = mqlog.NewQLOGHandler(qlogfile, "roq qlog", role)
+	}
 	r, err := newReceiver(roq.NewQUICGoConnection(conn), qlogger)
 	if err != nil {
 		return err
