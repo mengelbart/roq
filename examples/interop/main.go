@@ -162,7 +162,7 @@ func runSender(f flags, conn quic.Connection) error {
 		return err
 	}
 	payloader := &codecs.VP8Payloader{}
-	packetizer := rtp.NewPacketizer(1400, 96, 1, payloader, rtp.NewRandomSequencer(), 90_000)
+	packetizer := rtp.NewPacketizer(1200, 96, 1, payloader, rtp.NewRandomSequencer(), 90_000)
 	err = s.send(0, fr, packetizer, f.Mode)
 	if err != nil {
 		log.Printf("error while sending packets: %v", err)
