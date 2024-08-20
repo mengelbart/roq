@@ -3,10 +3,19 @@ package main
 import (
 	"context"
 	"io"
+	"log"
 
 	"github.com/mengelbart/qlog"
 	"github.com/mengelbart/roq"
 	"github.com/pion/rtp"
+)
+
+type mode int
+
+const (
+	datagramMode mode = iota
+	streamPerFrameMode
+	singleStreamMode
 )
 
 type FrameReader interface {
@@ -14,25 +23,31 @@ type FrameReader interface {
 }
 
 type sender struct {
-	session   *roq.Session
-	datagrams bool
+	session *roq.Session
 }
 
-func newSender(conn roq.Connection, qlog *qlog.Logger, datagrams bool) (*sender, error) {
+func newSender(conn roq.Connection, qlog *qlog.Logger) (*sender, error) {
 	session, err := roq.NewSession(conn, true, qlog)
 	if err != nil {
 		return nil, err
 	}
 	return &sender{
-		session:   session,
-		datagrams: datagrams,
+		session: session,
 	}, err
 }
 
-func (s *sender) send(flowID uint64, reader FrameReader, packetizer rtp.Packetizer) error {
+func (s *sender) send(flowID uint64, reader FrameReader, packetizer rtp.Packetizer, sendMode mode) error {
 	flow, err := s.session.NewSendFlow(flowID)
 	if err != nil {
 		return err
+	}
+	var singleStream *roq.RTPSendStream
+	if sendMode == singleStreamMode {
+		singleStream, err = flow.NewSendStream(context.Background())
+		if err != nil {
+			return err
+		}
+		defer singleStream.Close()
 	}
 	defer flow.Close()
 	for {
@@ -44,12 +59,27 @@ func (s *sender) send(flowID uint64, reader FrameReader, packetizer rtp.Packetiz
 			return err
 		}
 		packets := packetizer.Packetize(frame, 1)
-		if s.datagrams {
+		switch sendMode {
+		case datagramMode:
+			log.Printf("sending datagram")
 			if err := s.sendDatagrams(flow, packets); err != nil {
 				return err
 			}
-		} else {
-			if err := s.sendStream(flow, packets); err != nil {
+		case streamPerFrameMode:
+			log.Printf("sending stream per frame")
+			stream, err := flow.NewSendStream(context.Background())
+			if err != nil {
+				return err
+			}
+			if err := s.sendStream(stream, packets); err != nil {
+				return err
+			}
+			if err := stream.Close(); err != nil {
+				return err
+			}
+		case singleStreamMode:
+			log.Printf("sending single stream")
+			if err := s.sendStream(singleStream, packets); err != nil {
 				return err
 			}
 		}
@@ -70,11 +100,8 @@ func (s *sender) sendDatagrams(flow *roq.SendFlow, packets []*rtp.Packet) error 
 	return nil
 }
 
-func (s *sender) sendStream(flow *roq.SendFlow, packets []*rtp.Packet) error {
-	stream, err := flow.NewSendStream(context.Background())
-	if err != nil {
-		return err
-	}
+func (s *sender) sendStream(stream *roq.RTPSendStream, packets []*rtp.Packet) error {
+	log.Printf("sending %v packets on stream", len(packets))
 	for _, pkt := range packets {
 		buf, err := pkt.Marshal()
 		if err != nil {
@@ -85,7 +112,7 @@ func (s *sender) sendStream(flow *roq.SendFlow, packets []*rtp.Packet) error {
 			return err
 		}
 	}
-	return stream.Close()
+	return nil
 }
 
 func (s *sender) Close() error {

@@ -7,6 +7,7 @@ import (
 	"crypto/rsa"
 	"crypto/tls"
 	"crypto/x509"
+	"encoding/json"
 	"encoding/pem"
 	"flag"
 	"fmt"
@@ -28,15 +29,14 @@ import (
 )
 
 type flags struct {
-	server      bool
-	send        bool
-	cert        string
-	key         string
-	addr        string
-	destination string
-	ffmpeg      bool
-	codec       string
-	datagrams   bool
+	Server      bool
+	Send        bool
+	Cert        string
+	Key         string
+	Addr        string
+	Destination string
+	Codec       string
+	Mode        mode
 }
 
 func main() {
@@ -46,59 +46,42 @@ func main() {
 	log.Println("BYE")
 }
 
-func readConfig() flags {
-	testcase := os.Getenv("TESTCASE")
-	if len(testcase) > 0 {
-		return parseFlagsFromEnv(testcase)
-	}
-	return parseFlags()
-}
-
-func parseFlagsFromEnv(_ string) flags {
-	return flags{
-		server:      os.Getenv("ENDPOINT") == "server",
-		send:        os.Getenv("ROLE") == "sender",
-		cert:        os.Getenv("CERT"),
-		key:         os.Getenv("KEY"),
-		addr:        os.Getenv("ADDR"),
-		destination: os.Getenv("DESTINATION"),
-		ffmpeg:      len(os.Getenv("FFMPEG")) > 0,
-		codec:       os.Getenv("CODEC"),
-		datagrams:   os.Getenv("DATAGRAMS") == "TRUE",
-	}
-}
-
 func parseFlags() flags {
 	server := flag.Bool("server", false, "run as server (otherwise client)")
-	send := flag.Bool("send", false, "send RTP stream")
+	send := flag.Bool("send", false, "send RTP stream (otherwise receive)")
+	sendMode := flag.Int("mode", int(datagramMode), fmt.Sprintf("Send Mode: datagram: %v, stream-per-frame: %v, stream: %v", datagramMode, streamPerFrameMode, singleStreamMode))
+
+	destination := flag.String("destination", "", "output file of receiver, only if ffmpeg=false")
+	codec := flag.String("codec", "vp8", "codec: vp8 or h264")
+
 	cert := flag.String("cert", "localhost.pem", "TLS certificate file")
 	key := flag.String("key", "localhost-key.pem", "TLS key file")
 	addr := flag.String("addr", "localhost:8080", "listen address")
-	destination := flag.String("destination", "out.ivf", "output file of receiver, only if ffmpeg=false")
-	ffmpeg := flag.Bool("ffmpeg", false, "use ffmpeg instead of files for io")
-	codec := flag.String("codec", "vp8", "codec: vp8 or h264")
-	datagrams := flag.Bool("datagrams", false, "send datagrams instead of streams")
+
 	flag.Parse()
 	return flags{
-		server:      *server,
-		send:        *send,
-		cert:        *cert,
-		key:         *key,
-		addr:        *addr,
-		destination: *destination,
-		ffmpeg:      *ffmpeg,
-		codec:       *codec,
-		datagrams:   *datagrams,
+		Server:      *server,
+		Send:        *send,
+		Cert:        *cert,
+		Key:         *key,
+		Addr:        *addr,
+		Destination: *destination,
+		Codec:       *codec,
+		Mode:        mode(*sendMode),
 	}
 }
 
 func setupAndRun() error {
-	f := readConfig()
+	f := parseFlags()
 	keyLog, err := getSSLKeyLog()
 	if err != nil {
 		return err
 	}
-	log.Printf("got config: %v, keylog: %v\n", f, keyLog)
+	flagsJSON, err := json.Marshal(f)
+	if err != nil {
+		return err
+	}
+	log.Printf("got config: %v, keylog: %v\n", string(flagsJSON), keyLog)
 	if keyLog != nil {
 		defer func() {
 			log.Printf("closing keylog")
@@ -109,20 +92,20 @@ func setupAndRun() error {
 	if err != nil {
 		return err
 	}
-	if f.send {
+	if f.Send {
 		return runSender(f, conn)
 	}
 	return runReceiver(f, conn)
 }
 
 func connect(ctx context.Context, f flags, keyLog io.Writer) (quic.Connection, error) {
-	if f.server {
-		tlsConfig, err := generateTLSConfig(f.cert, f.key, keyLog)
+	if f.Server {
+		tlsConfig, err := generateTLSConfig(f.Cert, f.Key, keyLog)
 		tlsConfig.InsecureSkipVerify = true
 		if err != nil {
 			return nil, err
 		}
-		listener, err := quic.ListenAddr(f.addr, tlsConfig, &quic.Config{
+		listener, err := quic.ListenAddr(f.Addr, tlsConfig, &quic.Config{
 			EnableDatagrams: true,
 			Tracer:          qlogTracer,
 		})
@@ -135,7 +118,7 @@ func connect(ctx context.Context, f flags, keyLog io.Writer) (quic.Connection, e
 		}
 		return conn, nil
 	}
-	conn, err := quic.DialAddr(context.Background(), f.addr, &tls.Config{
+	conn, err := quic.DialAddr(context.Background(), f.Addr, &tls.Config{
 		InsecureSkipVerify: true,
 		NextProtos:         []string{"roq-09"},
 		KeyLogWriter:       keyLog,
@@ -151,7 +134,7 @@ func connect(ctx context.Context, f flags, keyLog io.Writer) (quic.Connection, e
 
 func runSender(f flags, conn quic.Connection) error {
 	role := "server"
-	if !f.server {
+	if !f.Server {
 		role = "client"
 	}
 	qlogfile := getQLOGWriter("roq", role)
@@ -162,7 +145,7 @@ func runSender(f flags, conn quic.Connection) error {
 	if qlogfile != nil {
 		qlogger = mqlog.NewQLOGHandler(qlogfile, "roq qlog", role)
 	}
-	s, err := newSender(roq.NewQUICGoConnection(conn), qlogger, f.datagrams)
+	s, err := newSender(roq.NewQUICGoConnection(conn), qlogger)
 	if err != nil {
 		return err
 	}
@@ -179,8 +162,8 @@ func runSender(f flags, conn quic.Connection) error {
 		return err
 	}
 	payloader := &codecs.VP8Payloader{}
-	packetizer := rtp.NewPacketizer(1200, 96, 1, payloader, rtp.NewRandomSequencer(), 90_000)
-	err = s.send(0, fr, packetizer)
+	packetizer := rtp.NewPacketizer(1400, 96, 1, payloader, rtp.NewRandomSequencer(), 90_000)
+	err = s.send(0, fr, packetizer, f.Mode)
 	if err != nil {
 		log.Printf("error while sending packets: %v", err)
 		// TODO: Close process gracefully
@@ -193,7 +176,7 @@ func runSender(f flags, conn quic.Connection) error {
 
 func runReceiver(f flags, conn quic.Connection) error {
 	role := "client"
-	if f.server {
+	if f.Server {
 		role = "server"
 	}
 	qlogfile := getQLOGWriter("roq", role)
@@ -209,7 +192,13 @@ func runReceiver(f flags, conn quic.Connection) error {
 		return err
 	}
 	var writer io.WriteCloser
-	if f.ffmpeg {
+	if len(f.Destination) > 0 {
+		fileWriter, err := newFileWriter(f.Destination, f.Codec)
+		if err != nil {
+			return err
+		}
+		writer = fileWriter
+	} else {
 		ffplay := exec.Command("ffplay", "-v", "debug", "-")
 		ffplay.Stdout = os.Stdout
 		ffplay.Stderr = os.Stderr
@@ -226,16 +215,10 @@ func runReceiver(f flags, conn quic.Connection) error {
 			//log.Printf("ffmpeg returned %v, err: %v", state, err)
 			ffplay.Process.Kill()
 		}()
-		writer, err = newIVFWriterWith(stdout, f.codec)
+		writer, err = newIVFWriterWith(stdout, f.Codec)
 		if err != nil {
 			return err
 		}
-	} else {
-		fileWriter, err := newFileWriter(f.destination, f.codec)
-		if err != nil {
-			return err
-		}
-		writer = fileWriter
 	}
 	return r.receive(0, writer)
 }
@@ -364,7 +347,7 @@ func (h bufferedWriteCloser) Write(p []byte) (int, error) {
 }
 
 func (h bufferedWriteCloser) Close() error {
-	if err := h.Writer.Flush(); err != nil {
+	if err := h.Flush(); err != nil {
 		return err
 	}
 	return h.Closer.Close()
