@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"io"
-	"log"
 
 	"github.com/mengelbart/qlog"
 	"github.com/mengelbart/roq"
@@ -61,12 +60,10 @@ func (s *sender) send(flowID uint64, reader FrameReader, packetizer rtp.Packetiz
 		packets := packetizer.Packetize(frame, 1)
 		switch sendMode {
 		case datagramMode:
-			log.Printf("sending datagram")
 			if err := s.sendDatagrams(flow, packets); err != nil {
 				return err
 			}
 		case streamPerFrameMode:
-			log.Printf("sending stream per frame")
 			stream, err := flow.NewSendStream(context.Background())
 			if err != nil {
 				return err
@@ -78,7 +75,6 @@ func (s *sender) send(flowID uint64, reader FrameReader, packetizer rtp.Packetiz
 				return err
 			}
 		case singleStreamMode:
-			log.Printf("sending single stream")
 			if err := s.sendStream(singleStream, packets); err != nil {
 				return err
 			}
@@ -101,7 +97,6 @@ func (s *sender) sendDatagrams(flow *roq.SendFlow, packets []*rtp.Packet) error 
 }
 
 func (s *sender) sendStream(stream *roq.RTPSendStream, packets []*rtp.Packet) error {
-	log.Printf("sending %v packets on stream", len(packets))
 	for _, pkt := range packets {
 		buf, err := pkt.Marshal()
 		if err != nil {
