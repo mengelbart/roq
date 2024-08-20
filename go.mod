@@ -7,7 +7,7 @@ require (
 	github.com/pion/interceptor v0.1.30-0.20240607185206-f42ed2b96855
 	github.com/pion/rtp v1.8.6
 	github.com/pion/webrtc/v3 v3.2.28
-	github.com/quic-go/quic-go v0.44.0
+	github.com/quic-go/quic-go v0.46.0
 	github.com/stretchr/testify v1.9.0
 )
 
