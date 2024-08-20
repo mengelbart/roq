@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/mengelbart/qlog"
+	"github.com/quic-go/quic-go"
 	"github.com/quic-go/quic-go/quicvarint"
 )
 
@@ -61,13 +62,21 @@ func (f *ReceiveFlow) readStream(rs ReceiveStream) {
 			if err == io.EOF {
 				return
 			}
+			streamErr, ok := err.(*quic.StreamError)
+			if ok {
+				log.Printf("got stream error: %v", streamErr)
+			}
 			log.Printf("got unexpected error while reading length: %v", err)
 			return
 		}
 		buf := make([]byte, length)
 		n, err := io.ReadFull(reader, buf)
 		if err != nil {
-			log.Printf("got unexpected error while reading length: %v", err)
+			streamErr, ok := err.(*quic.StreamError)
+			if ok {
+				log.Printf("got stream error: %v", streamErr)
+			}
+			log.Printf("got unexpected error after reading %v bytes of payload: %v", n, err)
 			return
 		}
 		if f.qlog != nil {
