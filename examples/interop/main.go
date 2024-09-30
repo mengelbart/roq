@@ -35,6 +35,7 @@ type flags struct {
 	Key         string
 	Addr        string
 	Destination string
+	Source      string
 	Codec       string
 	Mode        mode
 }
@@ -52,6 +53,7 @@ func parseFlags() flags {
 	sendMode := flag.Int("mode", int(datagramMode), fmt.Sprintf("Send Mode: datagram: %v, stream-per-frame: %v, stream: %v", datagramMode, streamPerFrameMode, singleStreamMode))
 
 	destination := flag.String("destination", "", "output file of receiver, only if ffmpeg=false")
+	source := flag.String("source", "", "input file of sender, generate testsrc if not set")
 	codec := flag.String("codec", "vp8", "codec: vp8 or h264")
 
 	cert := flag.String("cert", "localhost.pem", "TLS certificate file")
@@ -66,6 +68,7 @@ func parseFlags() flags {
 		Key:         *key,
 		Addr:        *addr,
 		Destination: *destination,
+		Source:      *source,
 		Codec:       *codec,
 		Mode:        mode(*sendMode),
 	}
@@ -149,7 +152,12 @@ func runSender(f flags, conn quic.Connection) error {
 	if err != nil {
 		return err
 	}
-	ffmpeg := exec.Command("ffmpeg", "-v", "debug", "-re", "-f", "lavfi", "-i", "testsrc=duration=10", "-g", "30", "-b:v", "1M", "-f", "ivf", "-")
+	var ffmpeg *exec.Cmd
+	if len(f.Source) == 0 {
+		ffmpeg = exec.Command("ffmpeg", "-v", "debug", "-re", "-f", "lavfi", "-i", "testsrc=duration=10", "-g", "30", "-b:v", "1M", "-f", "ivf", "-")
+	} else {
+		ffmpeg = exec.Command("ffmpeg", "-v", "debug", "-re", "-i", f.Source, "-b:v", "1M", "-f", "ivf", "-")
+	}
 	reader, err := ffmpeg.StdoutPipe()
 	if err != nil {
 		return err
