@@ -4,5 +4,5 @@
 
 [RTP over QUIC (RoQ)](https://datatracker.ietf.org/doc/draft-ietf-avtcore-rtp-over-quic/) implementation in Go.
 
-An example application using the library can be found here: [roq-gst](https://github.com/mengelbart/roq-gst).
+Example applications using the library can be found in the [examples](./examples) directory.
 
