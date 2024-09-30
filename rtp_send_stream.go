@@ -6,26 +6,35 @@ import (
 )
 
 type RTPSendStream struct {
-	stream SendStream
-	flowID uint64
-	qlog   *qlog.Logger
+	stream      SendStream
+	flowID      uint64
+	flowIDBytes []byte
+	sentFlowID  bool
+	buffer      []byte
+	qlog        *qlog.Logger
 }
 
-func newRTPSendStream(stream SendStream, flowID uint64, qlog *qlog.Logger) (*RTPSendStream, error) {
+func newRTPSendStream(stream SendStream, flowID uint64, flowIDBytes []byte, qlog *qlog.Logger) (*RTPSendStream, error) {
 	return &RTPSendStream{
-		stream: stream,
-		flowID: flowID,
-		qlog:   qlog,
+		stream:      stream,
+		flowID:      flowID,
+		flowIDBytes: flowIDBytes,
+		sentFlowID:  false,
+		buffer:      make([]byte, 0, 65536),
+		qlog:        qlog,
 	}, nil
 }
 
 // WriteRTPBytes sends an RTP or RTCP packet on the stream.
 func (s *RTPSendStream) WriteRTPBytes(packet []byte) (int, error) {
-	length := quicvarint.Len(uint64(len(packet)))
-	buf := make([]byte, 0, uint64(length)+uint64(len(packet)))
-	buf = quicvarint.Append(buf, uint64(len(packet)))
-	buf = append(buf, packet...)
-	_, err := s.stream.Write(buf)
+	s.buffer = s.buffer[0:0]
+	if !s.sentFlowID {
+		s.buffer = append(s.buffer, s.flowIDBytes...)
+		s.sentFlowID = true
+	}
+	s.buffer = quicvarint.Append(s.buffer, uint64(len(packet)))
+	s.buffer = append(s.buffer, packet...)
+	_, err := s.stream.Write(s.buffer)
 	if s.qlog != nil {
 		s.qlog.RoQStreamPacketCreated(s.flowID, s.stream.ID(), len(packet))
 	}

@@ -58,11 +58,7 @@ func (f *SendFlow) NewSendStream(ctx context.Context) (*RTPSendStream, error) {
 	if err != nil {
 		return nil, err
 	}
-	_, err = s.Write(f.flowID)
-	if err != nil {
-		return nil, err
-	}
-	stream, err := newRTPSendStream(s, f.id, f.qlog)
+	stream, err := newRTPSendStream(s, f.id, f.flowID, f.qlog)
 	if err != nil {
 		return nil, err
 	}
