@@ -1,6 +1,7 @@
 package roq
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"io"
@@ -188,7 +189,10 @@ func (s *Session) handleDatagram(datagram []byte) {
 		s.qlog.RoQDatagramPacketParsed(flowID, len(datagram)-n)
 	}
 	if f, ok := s.receiveFlows.get(flowID); ok {
-		f.push(datagram[quicvarint.Len(flowID):])
+		b := f.bufferPool.Get().(*bytes.Buffer)
+		b.Reset()
+		b.Write(datagram[quicvarint.Len(flowID):])
+		f.push(b)
 		return
 	}
 	f := s.receiveFlowBuffer.get(flowID)
@@ -196,7 +200,10 @@ func (s *Session) handleDatagram(datagram []byte) {
 		f = newReceiveFlow(flowID, s.receiveBufferSize, s.qlog)
 		s.receiveFlowBuffer.add(f)
 	}
-	f.push(datagram[n:])
+	b := f.bufferPool.Get().(*bytes.Buffer)
+	b.Reset()
+	b.Write(datagram[quicvarint.Len(flowID):])
+	f.push(b)
 }
 
 func (s *Session) handleUniStream(rs ReceiveStream) {

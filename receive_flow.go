@@ -1,6 +1,7 @@
 package roq
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"io"
@@ -14,20 +15,26 @@ import (
 )
 
 type ReceiveFlow struct {
-	id        uint64
-	buffer    chan []byte
-	ctx       context.Context
-	cancelCtx context.CancelFunc
-	lock      sync.Mutex
-	streams   map[int64]ReceiveStream
-	qlog      *qlog.Logger
+	id         uint64
+	buffer     chan *bytes.Buffer
+	bufferPool sync.Pool
+	ctx        context.Context
+	cancelCtx  context.CancelFunc
+	lock       sync.Mutex
+	streams    map[int64]ReceiveStream
+	qlog       *qlog.Logger
 }
 
 func newReceiveFlow(id uint64, receiveBufferSize int, qlog *qlog.Logger) *ReceiveFlow {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &ReceiveFlow{
-		id:        id,
-		buffer:    make(chan []byte, receiveBufferSize),
+		id:     id,
+		buffer: make(chan *bytes.Buffer, receiveBufferSize),
+		bufferPool: sync.Pool{
+			New: func() any {
+				return bytes.NewBuffer(make([]byte, 65535))
+			},
+		},
 		ctx:       ctx,
 		cancelCtx: cancel,
 		lock:      sync.Mutex{},
@@ -36,7 +43,7 @@ func newReceiveFlow(id uint64, receiveBufferSize int, qlog *qlog.Logger) *Receiv
 	}
 }
 
-func (f *ReceiveFlow) push(packet []byte) {
+func (f *ReceiveFlow) push(packet *bytes.Buffer) {
 	select {
 	case f.buffer <- packet:
 	case <-f.ctx.Done():
@@ -69,8 +76,10 @@ func (f *ReceiveFlow) readStream(rs ReceiveStream) {
 			log.Printf("got unexpected error while reading length: %v", err)
 			return
 		}
-		buf := make([]byte, length)
-		n, err := io.ReadFull(reader, buf)
+		r := io.LimitReader(reader, int64(length))
+		b := f.bufferPool.Get().(*bytes.Buffer)
+		b.Reset()
+		n, err := b.ReadFrom(r)
 		if err != nil {
 			streamErr, ok := err.(*quic.StreamError)
 			if ok {
@@ -82,14 +91,15 @@ func (f *ReceiveFlow) readStream(rs ReceiveStream) {
 		if f.qlog != nil {
 			f.qlog.RoQStreamPacketParsed(f.id, rs.ID(), int(length))
 		}
-		f.push(buf[:n])
+		f.push(b)
 	}
 }
 
 func (f *ReceiveFlow) Read(buf []byte) (int, error) {
 	select {
 	case packet := <-f.buffer:
-		n := copy(buf, packet)
+		n := copy(buf, packet.Bytes())
+		f.bufferPool.Put(packet)
 		return n, nil
 	case <-f.ctx.Done():
 		return 0, f.ctx.Err()
