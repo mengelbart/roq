@@ -3,7 +3,6 @@ package main
 import (
 	"errors"
 	"io"
-	"log"
 
 	"github.com/pion/interceptor/pkg/jitterbuffer"
 	"github.com/pion/rtp"
@@ -48,7 +47,6 @@ type wrapper struct {
 }
 
 func (w *wrapper) Write(buf []byte) (int, error) {
-	log.Printf("receiving frame of size %v", len(buf))
 	return w.w.Write(buf)
 }
 
@@ -88,19 +86,19 @@ func (w *fileWriter) Write(buf []byte) (int, error) {
 		return len(buf), err
 	}
 	w.buffer.Push(pkt)
-	p, err := w.buffer.Pop()
-	if err != nil {
-		return len(buf), nil
-	}
-	if p != nil {
-		err = w.writer.WriteRTP(p)
+
+	for {
+		p, err := w.buffer.Pop()
 		if err != nil {
-			return len(buf), err
+			return len(buf), nil
+		}
+		if p != nil {
+			err = w.writer.WriteRTP(p)
+			if err != nil {
+				return len(buf), err
+			}
 		}
 	}
-	// err = w.writer.WriteRTP(pkt)
-	// return len(buf), err
-	return len(buf), nil
 }
 
 func (w *fileWriter) Close() error {
