@@ -32,16 +32,8 @@ func (r *receiver) receive(flowID uint64, writer io.WriteCloser) error {
 	}
 	defer flow.Close()
 	defer writer.Close()
-	buf := make([]byte, bufferSize)
-	for {
-		n, err := flow.Read(buf)
-		if err != nil {
-			return err
-		}
-		if _, err := writer.Write(buf[:n]); err != nil {
-			return err
-		}
-	}
+	_, err = io.Copy(writer, flow)
+	return err
 }
 
 func (r *receiver) Close() error {
