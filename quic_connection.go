@@ -60,26 +60,22 @@ func (c *QUICGoConnection) ReceiveDatagram(ctx context.Context) ([]byte, error) 
 	return c.conn.ReceiveDatagram(ctx)
 }
 
-func (c *QUICGoConnection) OpenUniStreamSync(ctx context.Context) (SendStream, error) {
+func (c *QUICGoConnection) OpenUniStreamSync(ctx context.Context) (quic.SendStream, error) {
 	s, err := c.conn.OpenUniStreamSync(ctx)
 	if err != nil {
 		return nil, err
 	}
-	return &quicGoSendStream{
-		stream: s,
-	}, nil
+	return s, nil
 }
 
-func (c *QUICGoConnection) AcceptUniStream(ctx context.Context) (ReceiveStream, error) {
+func (c *QUICGoConnection) AcceptUniStream(ctx context.Context) (quic.ReceiveStream, error) {
 	s, err := c.conn.AcceptUniStream(ctx)
 	if err != nil {
 		return nil, err
 	}
-	return &quicGoReceiveStream{
-		stream: s,
-	}, nil
+	return s, nil
 }
 
-func (c *QUICGoConnection) CloseWithError(code uint64, reason string) error {
+func (c *QUICGoConnection) CloseWithError(code quic.ApplicationErrorCode, reason string) error {
 	return c.conn.CloseWithError(quic.ApplicationErrorCode(code), reason)
 }

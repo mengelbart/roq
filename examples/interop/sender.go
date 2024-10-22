@@ -30,6 +30,7 @@ func newSender(conn roq.Connection, qlog *qlog.Logger) (*sender, error) {
 	if err != nil {
 		return nil, err
 	}
+	session.Start()
 	return &sender{
 		session: session,
 	}, err

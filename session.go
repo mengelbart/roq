@@ -4,34 +4,21 @@ import (
 	"bytes"
 	"context"
 	"errors"
-	"io"
 	"sync"
 
 	"github.com/mengelbart/qlog"
+	"github.com/quic-go/quic-go"
 	"github.com/quic-go/quic-go/quicvarint"
 )
 
 const defaultReceiveBufferSize = 1024 // Number of packets to buffer
 
-type SendStream interface {
-	io.Writer
-	io.Closer
-	ID() int64
-	CancelWrite(uint64)
-}
-
-type ReceiveStream interface {
-	io.Reader
-	ID() int64
-	CancelRead(uint64)
-}
-
 type Connection interface {
 	SendDatagram(payload []byte) error
 	ReceiveDatagram(context.Context) ([]byte, error)
-	OpenUniStreamSync(context.Context) (SendStream, error)
-	AcceptUniStream(context.Context) (ReceiveStream, error)
-	CloseWithError(uint64, string) error
+	OpenUniStreamSync(context.Context) (quic.SendStream, error)
+	AcceptUniStream(context.Context) (quic.ReceiveStream, error)
+	CloseWithError(quic.ApplicationErrorCode, string) error
 }
 
 type Session struct {
@@ -68,11 +55,10 @@ func NewSession(conn Connection, acceptDatagrams bool, qlogger *qlog.Logger) (*S
 		cancelCtx:         cancel,
 		qlog:              qlogger,
 	}
-	s.start()
 	return s, nil
 }
 
-func (s *Session) start() {
+func (s *Session) Start() {
 	if s.acceptDatagrams {
 		s.wg.Add(1)
 		go func() {
@@ -131,7 +117,7 @@ func (s *Session) close(code uint64, reason string) {
 	defer s.mutex.Unlock()
 	s.sendFlows.rangeFn(func(_ uint64, v *SendFlow) { v.Close() })
 	s.receiveFlows.rangeFn(func(_ uint64, v *ReceiveFlow) { v.Close() })
-	_ = s.conn.CloseWithError(code, reason)
+	_ = s.conn.CloseWithError(quic.ApplicationErrorCode(code), reason)
 	s.closedErr = SessionError{
 		code:   code,
 		reason: reason,
@@ -164,7 +150,12 @@ func (s *Session) receiveUniStreams() error {
 		s.wg.Add(1)
 		go func() {
 			defer s.wg.Done()
-			s.handleUniStream(rs)
+			flowID, err := quicvarint.Read(quicvarint.NewReader(rs))
+			if err != nil {
+				rs.CancelRead(ErrRoQUnknownFlowID)
+				return
+			}
+			s.ReadStream(rs, flowID)
 		}()
 	}
 }
@@ -206,15 +197,9 @@ func (s *Session) handleDatagram(datagram []byte) {
 	f.push(b)
 }
 
-func (s *Session) handleUniStream(rs ReceiveStream) {
-	reader := quicvarint.NewReader(rs)
-	flowID, err := quicvarint.Read(reader)
-	if err != nil {
-		s.closeWithError(ErrRoQPacketError, "invalid flow ID")
-		return
-	}
+func (s *Session) ReadStream(rs quic.ReceiveStream, flowID uint64) {
 	if s.qlog != nil {
-		s.qlog.RoQStreamOpened(flowID, rs.ID())
+		s.qlog.RoQStreamOpened(flowID, int64(rs.StreamID()))
 	}
 	if f, ok := s.receiveFlows.get(flowID); ok {
 		f.readStream(rs)

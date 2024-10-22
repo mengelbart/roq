@@ -2,11 +2,12 @@ package roq
 
 import (
 	"github.com/mengelbart/qlog"
+	"github.com/quic-go/quic-go"
 	"github.com/quic-go/quic-go/quicvarint"
 )
 
 type RTPSendStream struct {
-	stream      SendStream
+	stream      quic.SendStream
 	flowID      uint64
 	flowIDBytes []byte
 	sentFlowID  bool
@@ -14,7 +15,7 @@ type RTPSendStream struct {
 	qlog        *qlog.Logger
 }
 
-func newRTPSendStream(stream SendStream, flowID uint64, flowIDBytes []byte, qlog *qlog.Logger) (*RTPSendStream, error) {
+func newRTPSendStream(stream quic.SendStream, flowID uint64, flowIDBytes []byte, qlog *qlog.Logger) (*RTPSendStream, error) {
 	return &RTPSendStream{
 		stream:      stream,
 		flowID:      flowID,
@@ -36,14 +37,14 @@ func (s *RTPSendStream) WriteRTPBytes(packet []byte) (int, error) {
 	s.buffer = append(s.buffer, packet...)
 	_, err := s.stream.Write(s.buffer)
 	if s.qlog != nil {
-		s.qlog.RoQStreamPacketCreated(s.flowID, s.stream.ID(), len(packet))
+		s.qlog.RoQStreamPacketCreated(s.flowID, int64(s.stream.StreamID()), len(packet))
 	}
 	return len(packet), err
 }
 
 // CancelStream closes the stream with the given error code.
 func (s *RTPSendStream) CancelStream(errorCode uint64) {
-	s.stream.CancelWrite(errorCode)
+	s.stream.CancelWrite(quic.StreamErrorCode(errorCode))
 }
 
 // Close closes the stream gracefully.

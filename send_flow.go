@@ -63,7 +63,7 @@ func (f *SendFlow) NewSendStream(ctx context.Context) (*RTPSendStream, error) {
 		return nil, err
 	}
 	if f.qlog != nil {
-		f.qlog.RoQStreamOpened(f.id, s.ID())
+		f.qlog.RoQStreamOpened(f.id, int64(s.StreamID()))
 	}
 	f.lock.Lock()
 	defer f.lock.Unlock()

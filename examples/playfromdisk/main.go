@@ -85,7 +85,7 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-
+	session.Start()
 	flow, err := session.NewSendFlow(0)
 	if err != nil {
 		panic(err)

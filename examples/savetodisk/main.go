@@ -38,6 +38,7 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
+	session.Start()
 	flow, err := session.NewReceiveFlow(0)
 	if err != nil {
 		panic(err)

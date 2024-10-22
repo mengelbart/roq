@@ -20,6 +20,7 @@ func newReceiver(conn roq.Connection, qlog *qlog.Logger) (*receiver, error) {
 	if err != nil {
 		return nil, err
 	}
+	session.Start()
 	return &receiver{
 		session: session,
 	}, err

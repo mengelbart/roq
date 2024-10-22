@@ -21,7 +21,7 @@ type ReceiveFlow struct {
 	ctx        context.Context
 	cancelCtx  context.CancelFunc
 	lock       sync.Mutex
-	streams    map[int64]ReceiveStream
+	streams    map[int64]quic.ReceiveStream
 	qlog       *qlog.Logger
 }
 
@@ -38,7 +38,7 @@ func newReceiveFlow(id uint64, receiveBufferSize int, qlog *qlog.Logger) *Receiv
 		ctx:       ctx,
 		cancelCtx: cancel,
 		lock:      sync.Mutex{},
-		streams:   map[int64]ReceiveStream{},
+		streams:   map[int64]quic.ReceiveStream{},
 		qlog:      qlog,
 	}
 }
@@ -51,7 +51,7 @@ func (f *ReceiveFlow) push(packet *bytes.Buffer) {
 	}
 }
 
-func (f *ReceiveFlow) readStream(rs ReceiveStream) {
+func (f *ReceiveFlow) readStream(rs quic.ReceiveStream) {
 	select {
 	case <-f.ctx.Done():
 		rs.CancelRead(ErrRoQNoError)
@@ -59,7 +59,7 @@ func (f *ReceiveFlow) readStream(rs ReceiveStream) {
 	default:
 	}
 	f.lock.Lock()
-	f.streams[rs.ID()] = rs
+	f.streams[int64(rs.StreamID())] = rs
 	f.lock.Unlock()
 
 	reader := quicvarint.NewReader(rs)
@@ -89,7 +89,7 @@ func (f *ReceiveFlow) readStream(rs ReceiveStream) {
 			return
 		}
 		if f.qlog != nil {
-			f.qlog.RoQStreamPacketParsed(f.id, rs.ID(), int(length))
+			f.qlog.RoQStreamPacketParsed(f.id, int64(rs.StreamID()), int(length))
 		}
 		f.push(b)
 	}
@@ -120,7 +120,7 @@ func (f *ReceiveFlow) ID() uint64 {
 
 func (f *ReceiveFlow) closeWithError(code uint64) {
 	for _, s := range f.streams {
-		s.CancelRead(code)
+		s.CancelRead(quic.StreamErrorCode(code))
 	}
 }
 
