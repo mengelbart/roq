@@ -166,11 +166,11 @@ func (s *Session) receiveDatagrams() error {
 		if err != nil {
 			return err
 		}
-		s.handleDatagram(dgram)
+		s.HandleDatagram(dgram)
 	}
 }
 
-func (s *Session) handleDatagram(datagram []byte) {
+func (s *Session) HandleDatagram(datagram []byte) {
 	flowID, n, err := quicvarint.Parse(datagram)
 	if err != nil {
 		s.closeWithError(ErrRoQPacketError, "invalid flow ID")
