@@ -51,3 +51,7 @@ func (s *RTPSendStream) CancelStream(errorCode uint64) {
 func (s *RTPSendStream) Close() error {
 	return s.stream.Close()
 }
+
+func (s *RTPSendStream) StreamID() int64 {
+	return int64(s.stream.StreamID())
+}

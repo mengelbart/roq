@@ -30,6 +30,8 @@ type Session struct {
 	receiveFlows      *syncMap[uint64, *ReceiveFlow]
 	receiveFlowBuffer *receiveFlowBuffer
 
+	priority uint32
+
 	mutex     sync.Mutex
 	closedErr error
 	wg        sync.WaitGroup
@@ -56,6 +58,12 @@ func NewSession(conn Connection, acceptDatagrams bool, qlogger *qlog.Logger) (*S
 		qlog:              qlogger,
 	}
 	return s, nil
+}
+
+func (s *Session) SetPriority(priority uint32) {
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+	s.priority = priority
 }
 
 func (s *Session) Start() {
@@ -85,7 +93,7 @@ func (s *Session) NewSendFlow(id uint64) (*SendFlow, error) {
 	if _, ok := s.sendFlows.get(id); ok {
 		return nil, errors.New("duplicate flow ID")
 	}
-	f := newFlow(s.conn, id, func() {
+	f := newFlow(s.conn, id, s.priority, func() {
 		s.sendFlows.delete(id)
 	}, s.qlog)
 	if err := s.sendFlows.add(id, f); err != nil {

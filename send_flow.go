@@ -8,18 +8,24 @@ import (
 	"github.com/quic-go/quic-go/quicvarint"
 )
 
+type prioritySetter interface {
+	SetPriority(uint32)
+	SetIncremental(bool)
+}
+
 type SendFlow struct {
 	lock      sync.Mutex
 	id        uint64
 	conn      Connection
 	flowID    []byte
 	streams   []*RTPSendStream
+	priority  uint32
 	onClose   func()
 	closedErr error
 	qlog      *qlog.Logger
 }
 
-func newFlow(conn Connection, id uint64, onClose func(), qlog *qlog.Logger) *SendFlow {
+func newFlow(conn Connection, id uint64, priority uint32, onClose func(), qlog *qlog.Logger) *SendFlow {
 	flowID := make([]byte, 0, quicvarint.Len(id))
 	flowID = quicvarint.Append(flowID, id)
 	return &SendFlow{
@@ -28,6 +34,7 @@ func newFlow(conn Connection, id uint64, onClose func(), qlog *qlog.Logger) *Sen
 		conn:      conn,
 		flowID:    flowID,
 		streams:   []*RTPSendStream{},
+		priority:  priority,
 		onClose:   onClose,
 		closedErr: nil,
 		qlog:      qlog,
@@ -57,6 +64,10 @@ func (f *SendFlow) NewSendStream(ctx context.Context) (*RTPSendStream, error) {
 	s, err := f.conn.OpenUniStreamSync(ctx)
 	if err != nil {
 		return nil, err
+	}
+	if ps, ok := s.(prioritySetter); ok {
+		ps.SetPriority(f.priority)
+		ps.SetIncremental(true)
 	}
 	stream, err := newRTPSendStream(s, f.id, f.flowID, f.qlog)
 	if err != nil {
