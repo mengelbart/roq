@@ -51,11 +51,11 @@ func (b *receiveFlowBuffer) get(id uint64) *ReceiveFlow {
 func (b *receiveFlowBuffer) pop(id uint64) *ReceiveFlow {
 	b.mutex.Lock()
 	defer b.mutex.Unlock()
-	i := slices.IndexFunc[[]uint64, uint64](b.queue, func(f uint64) bool {
+	i := slices.IndexFunc(b.queue, func(f uint64) bool {
 		return f == id
 	})
 	if i >= 0 && i < len(b.queue) {
-		slices.Delete[[]uint64, uint64](b.queue, i, i)
+		b.queue = slices.Delete(b.queue, i, i)
 	}
 	if f, ok := b.buffer[id]; ok {
 		return f
