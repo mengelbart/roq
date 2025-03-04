@@ -20,6 +20,7 @@ import (
 	"time"
 
 	mqlog "github.com/mengelbart/qlog"
+	roqqlog "github.com/mengelbart/qlog/roq"
 	"github.com/mengelbart/roq"
 	"github.com/pion/rtp"
 	"github.com/pion/rtp/codecs"
@@ -146,7 +147,7 @@ func runSender(f flags, conn quic.Connection) error {
 	}
 	var qlogger *mqlog.Logger
 	if qlogfile != nil {
-		qlogger = mqlog.NewQLOGHandler(qlogfile, "roq qlog", role)
+		qlogger = mqlog.NewQLOGHandler(qlogfile, "roq qlog", "RoQ Interop tester QLOG Events", role, roqqlog.Schema)
 	}
 	s, err := newSender(roq.NewQUICGoConnection(conn), qlogger)
 	if err != nil {
@@ -193,7 +194,7 @@ func runReceiver(f flags, conn quic.Connection) error {
 	}
 	var qlogger *mqlog.Logger
 	if qlogfile != nil {
-		qlogger = mqlog.NewQLOGHandler(qlogfile, "roq qlog", role)
+		qlogger = mqlog.NewQLOGHandler(qlogfile, "roq-qlog", "RoQ Interop tester QLOG Events", role, roqqlog.Schema)
 	}
 	r, err := newReceiver(roq.NewQUICGoConnection(conn), qlogger)
 	if err != nil {

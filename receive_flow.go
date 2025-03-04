@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/mengelbart/qlog"
+	roqqlog "github.com/mengelbart/qlog/roq"
 	"github.com/quic-go/quic-go"
 	"github.com/quic-go/quic-go/quicvarint"
 )
@@ -89,7 +90,21 @@ func (f *ReceiveFlow) readStream(rs ReceiveStream) {
 			return
 		}
 		if f.qlog != nil {
-			f.qlog.RoQStreamPacketParsed(f.id, rs.ID(), int(length))
+			raw := make([]byte, b.Len())
+			n := copy(raw, b.Bytes())
+			f.qlog.Log(roqqlog.StreamPacketEvent{
+				EventName: roqqlog.StreamPacketEventTypeParsed,
+				StreamID:  rs.ID(),
+				Packet: roqqlog.Packet{
+					FlowID: f.id,
+					Length: length,
+					Raw: &qlog.RawInfo{
+						Length:        length,
+						PayloadLength: length,
+						Data:          raw[:n],
+					},
+				},
+			})
 		}
 		f.push(b)
 	}

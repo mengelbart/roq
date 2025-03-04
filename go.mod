@@ -1,14 +1,14 @@
 module github.com/mengelbart/roq
 
-go 1.22.3
+go 1.23.6
 
 require (
-	github.com/mengelbart/qlog v0.0.0-20240720205814-d54597c9c5fb
+	github.com/mengelbart/qlog v0.0.0-20250304144032-13728b0b6fae
 	github.com/pion/interceptor v0.1.30-0.20240607185206-f42ed2b96855
 	github.com/pion/rtp v1.8.6
 	github.com/pion/webrtc/v3 v3.2.28
 	github.com/quic-go/quic-go v0.47.0
-	github.com/stretchr/testify v1.9.0
+	github.com/stretchr/testify v1.10.0
 )
 
 require (

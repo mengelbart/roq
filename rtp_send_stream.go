@@ -2,6 +2,7 @@ package roq
 
 import (
 	"github.com/mengelbart/qlog"
+	roqqlog "github.com/mengelbart/qlog/roq"
 	"github.com/quic-go/quic-go/quicvarint"
 )
 
@@ -34,9 +35,23 @@ func (s *RTPSendStream) WriteRTPBytes(packet []byte) (int, error) {
 	}
 	s.buffer = quicvarint.Append(s.buffer, uint64(len(packet)))
 	s.buffer = append(s.buffer, packet...)
-	_, err := s.stream.Write(s.buffer)
+	n, err := s.stream.Write(s.buffer)
 	if s.qlog != nil {
-		s.qlog.RoQStreamPacketCreated(s.flowID, s.stream.ID(), len(packet))
+		raw := make([]byte, len(s.buffer))
+		m := copy(raw, s.buffer)
+		s.qlog.Log(roqqlog.StreamPacketEvent{
+			EventName: roqqlog.StreamPacketEventTypeCreated,
+			StreamID:  s.stream.ID(),
+			Packet: roqqlog.Packet{
+				FlowID: s.flowID,
+				Length: uint64(n),
+				Raw: &qlog.RawInfo{
+					Length:        uint64(m),
+					PayloadLength: uint64(m),
+					Data:          raw,
+				},
+			},
+		})
 	}
 	return len(packet), err
 }

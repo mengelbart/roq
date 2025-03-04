@@ -8,6 +8,7 @@ import (
 	"sync"
 
 	"github.com/mengelbart/qlog"
+	roqqlog "github.com/mengelbart/qlog/roq"
 	"github.com/quic-go/quic-go/quicvarint"
 )
 
@@ -186,7 +187,20 @@ func (s *Session) handleDatagram(datagram []byte) {
 		return
 	}
 	if s.qlog != nil {
-		s.qlog.RoQDatagramPacketParsed(flowID, len(datagram)-n)
+		raw := make([]byte, len(datagram))
+		m := copy(raw, datagram)
+		s.qlog.Log(roqqlog.DatagramPacketEvent{
+			Type: roqqlog.DatagramPacketEventTypeParsed,
+			Packet: roqqlog.Packet{
+				FlowID: flowID,
+				Length: uint64(n),
+				Raw: &qlog.RawInfo{
+					Length:        uint64(m),
+					PayloadLength: uint64(m),
+					Data:          raw,
+				},
+			},
+		})
 	}
 	if f, ok := s.receiveFlows.get(flowID); ok {
 		b := f.bufferPool.Get().(*bytes.Buffer)
@@ -214,7 +228,10 @@ func (s *Session) handleUniStream(rs ReceiveStream) {
 		return
 	}
 	if s.qlog != nil {
-		s.qlog.RoQStreamOpened(flowID, rs.ID())
+		s.qlog.Log(roqqlog.StreamOpenedEvent{
+			FlowID:   flowID,
+			StreamID: uint64(rs.ID()),
+		})
 	}
 	if f, ok := s.receiveFlows.get(flowID); ok {
 		f.readStream(rs)
