@@ -229,6 +229,7 @@ func runReceiver(f flags, conn quic.Connection) error {
 			return err
 		}
 	}
+	r.receiveRTCP(1)
 	return r.receive(0, writer)
 }
 

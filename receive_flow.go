@@ -118,7 +118,7 @@ func (f *ReceiveFlow) Read(buf []byte) (int, error) {
 		return n, nil
 	case <-f.ctx.Done():
 		return 0, f.ctx.Err()
-	case <-time.After(time.Second):
+	case <-time.After(10 * time.Second):
 		// TODO: Implement real deadline
 		return 0, errors.New("deadline exceeded")
 	}
