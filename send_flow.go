@@ -107,3 +107,7 @@ func (f *SendFlow) Close() error {
 	f.closedErr = errClosed
 	return nil
 }
+
+func (f *SendFlow) ID() uint64 {
+	return f.id
+}
