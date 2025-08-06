@@ -76,7 +76,7 @@ func main() {
 		MaxIncomingStreams:             math.MaxInt32,
 		MaxIncomingUniStreams:          math.MaxInt32,
 		EnableDatagrams:                true,
-		Tracer:                         qlog.DefaultTracer,
+		Tracer:                         qlog.DefaultConnectionTracer,
 	})
 	if err != nil {
 		panic(err)

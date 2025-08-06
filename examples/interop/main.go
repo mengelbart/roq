@@ -102,7 +102,7 @@ func setupAndRun() error {
 	return runReceiver(f, conn)
 }
 
-func connect(ctx context.Context, f flags, keyLog io.Writer) (quic.Connection, error) {
+func connect(ctx context.Context, f flags, keyLog io.Writer) (*quic.Conn, error) {
 	if f.Server {
 		tlsConfig, err := generateTLSConfig(f.Cert, f.Key, keyLog)
 		tlsConfig.InsecureSkipVerify = true
@@ -136,7 +136,7 @@ func connect(ctx context.Context, f flags, keyLog io.Writer) (quic.Connection, e
 	return conn, nil
 }
 
-func runSender(f flags, conn quic.Connection) error {
+func runSender(f flags, conn *quic.Conn) error {
 	role := "server"
 	if !f.Server {
 		role = "client"
@@ -183,7 +183,7 @@ func runSender(f flags, conn quic.Connection) error {
 	return ffmpeg.Wait()
 }
 
-func runReceiver(f flags, conn quic.Connection) error {
+func runReceiver(f flags, conn *quic.Conn) error {
 	role := "client"
 	if f.Server {
 		role = "server"

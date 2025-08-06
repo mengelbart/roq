@@ -7,7 +7,7 @@ import (
 )
 
 type quicGoReceiveStream struct {
-	stream quic.ReceiveStream
+	stream *quic.ReceiveStream
 }
 
 func (s *quicGoReceiveStream) ID() int64 {
@@ -23,7 +23,7 @@ func (c *quicGoReceiveStream) Read(p []byte) (n int, err error) {
 }
 
 type quicGoSendStream struct {
-	stream quic.SendStream
+	stream *quic.SendStream
 }
 
 func (s *quicGoSendStream) ID() int64 {
@@ -43,10 +43,10 @@ func (s *quicGoSendStream) CancelWrite(c uint64) {
 }
 
 type QUICGoConnection struct {
-	conn quic.Connection
+	conn *quic.Conn
 }
 
-func NewQUICGoConnection(conn quic.Connection) *QUICGoConnection {
+func NewQUICGoConnection(conn *quic.Conn) *QUICGoConnection {
 	return &QUICGoConnection{
 		conn: conn,
 	}

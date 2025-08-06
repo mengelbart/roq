@@ -25,7 +25,7 @@ func main() {
 	}
 	listener, err := quic.ListenAddr(*addr, tlsConfig, &quic.Config{
 		EnableDatagrams: true,
-		Tracer:          qlog.DefaultTracer,
+		Tracer:          qlog.DefaultConnectionTracer,
 	})
 	if err != nil {
 		panic(err)
