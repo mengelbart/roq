@@ -6,39 +6,51 @@ import (
 	"github.com/quic-go/quic-go"
 )
 
-type quicGoReceiveStream struct {
+type QuicGoReceiveStream struct {
 	stream *quic.ReceiveStream
 }
 
-func (s *quicGoReceiveStream) ID() int64 {
+func NewQuicGoReceiveStream(stream *quic.ReceiveStream) *QuicGoReceiveStream {
+	return &QuicGoReceiveStream{
+		stream: stream,
+	}
+}
+
+func (s *QuicGoReceiveStream) ID() int64 {
 	return int64(s.stream.StreamID())
 }
 
-func (s *quicGoReceiveStream) CancelRead(c uint64) {
+func (s *QuicGoReceiveStream) CancelRead(c uint64) {
 	s.stream.CancelRead(quic.StreamErrorCode(c))
 }
 
-func (c *quicGoReceiveStream) Read(p []byte) (n int, err error) {
+func (c *QuicGoReceiveStream) Read(p []byte) (n int, err error) {
 	return c.stream.Read(p)
 }
 
-type quicGoSendStream struct {
+type QuicGoSendStream struct {
 	stream *quic.SendStream
 }
 
-func (s *quicGoSendStream) ID() int64 {
+func NewQuicstream(stream *quic.SendStream) *QuicGoSendStream {
+	return &QuicGoSendStream{
+		stream: stream,
+	}
+}
+
+func (s *QuicGoSendStream) ID() int64 {
 	return int64(s.stream.StreamID())
 }
 
-func (s *quicGoSendStream) Write(b []byte) (int, error) {
+func (s *QuicGoSendStream) Write(b []byte) (int, error) {
 	return s.stream.Write(b)
 }
 
-func (s *quicGoSendStream) Close() error {
+func (s *QuicGoSendStream) Close() error {
 	return s.stream.Close()
 }
 
-func (s *quicGoSendStream) CancelWrite(c uint64) {
+func (s *QuicGoSendStream) CancelWrite(c uint64) {
 	s.stream.CancelWrite(quic.StreamErrorCode(c))
 }
 
@@ -65,7 +77,7 @@ func (c *QUICGoConnection) OpenUniStreamSync(ctx context.Context) (SendStream, e
 	if err != nil {
 		return nil, err
 	}
-	return &quicGoSendStream{
+	return &QuicGoSendStream{
 		stream: s,
 	}, nil
 }
@@ -75,7 +87,7 @@ func (c *QUICGoConnection) AcceptUniStream(ctx context.Context) (ReceiveStream, 
 	if err != nil {
 		return nil, err
 	}
-	return &quicGoReceiveStream{
+	return &QuicGoReceiveStream{
 		stream: s,
 	}, nil
 }
