@@ -53,9 +53,25 @@ type Session struct {
 	qlog *qlog.Logger
 }
 
+// NewSession creates a new roq session. QUIC connection is handled by roq.
 func NewSession(conn Connection, acceptDatagrams bool, qlogger *qlog.Logger) (*Session, error) {
+	s := newSession(conn, acceptDatagrams, qlogger)
+	s.start()
+
+	return s, nil
+}
+
+// NewSessionWithAppHandeledConn creates a new roq session. QUIC connection is handled by application.
+// HandleDatagram and HandleUniStreamWithFlowID have to be  called for each datagram / new stream.
+func NewSessionWithAppHandeledConn(conn Connection, acceptDatagrams bool, qlogger *qlog.Logger) (*Session, error) {
+	s := newSession(conn, acceptDatagrams, qlogger)
+
+	return s, nil
+}
+
+func newSession(conn Connection, acceptDatagrams bool, qlogger *qlog.Logger) *Session {
 	ctx, cancel := context.WithCancel(context.Background())
-	s := &Session{
+	return &Session{
 		receiveBufferSize: defaultReceiveBufferSize,
 		acceptDatagrams:   acceptDatagrams,
 		conn:              conn,
@@ -69,8 +85,6 @@ func NewSession(conn Connection, acceptDatagrams bool, qlogger *qlog.Logger) (*S
 		cancelCtx:         cancel,
 		qlog:              qlogger,
 	}
-	s.start()
-	return s, nil
 }
 
 func (s *Session) start() {
@@ -176,11 +190,14 @@ func (s *Session) receiveDatagrams() error {
 		if err != nil {
 			return err
 		}
-		s.handleDatagram(dgram)
+		s.HandleDatagram(dgram)
 	}
 }
 
-func (s *Session) handleDatagram(datagram []byte) {
+// HandleUniStreamWithFlowID handles a datagram.
+// If QUIC connection is handled by the application, this function has to be called by the application
+// for each datagram that belongs to belongs to the roq connnection.
+func (s *Session) HandleDatagram(datagram []byte) {
 	flowID, n, err := quicvarint.Parse(datagram)
 	if err != nil {
 		s.closeWithError(ErrRoQPacketError, "invalid flow ID")
@@ -220,13 +237,10 @@ func (s *Session) handleDatagram(datagram []byte) {
 	f.push(b)
 }
 
-func (s *Session) handleUniStream(rs ReceiveStream) {
-	reader := quicvarint.NewReader(rs)
-	flowID, err := quicvarint.Read(reader)
-	if err != nil {
-		s.closeWithError(ErrRoQPacketError, "invalid flow ID")
-		return
-	}
+// HandleUniStreamWithFlowID handles a new flow with the flowID allready parsed.
+// If QUIC connection is handled by the application, this function has to be called by the application
+// for each new QUIC stream containing a roq floqID.
+func (s *Session) HandleUniStreamWithFlowID(flowID uint64, rs ReceiveStream) {
 	if s.qlog != nil {
 		s.qlog.Log(roqqlog.StreamOpenedEvent{
 			FlowID:   flowID,
@@ -243,4 +257,15 @@ func (s *Session) handleUniStream(rs ReceiveStream) {
 		s.receiveFlowBuffer.add(f)
 	}
 	f.readStream(rs)
+}
+
+func (s *Session) handleUniStream(rs ReceiveStream) {
+	reader := quicvarint.NewReader(rs)
+	flowID, err := quicvarint.Read(reader)
+	if err != nil {
+		s.closeWithError(ErrRoQPacketError, "invalid flow ID")
+		return
+	}
+
+	s.HandleUniStreamWithFlowID(flowID, rs)
 }
