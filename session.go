@@ -19,6 +19,9 @@ type SendStream interface {
 	io.Closer
 	ID() int64
 	CancelWrite(uint64)
+
+	SetPriority(p uint32)
+	SetIncremental(b bool)
 }
 
 type ReceiveStream interface {

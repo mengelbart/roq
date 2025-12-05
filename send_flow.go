@@ -64,7 +64,7 @@ func (f *SendFlow) WriteRTPBytes(packet []byte) error {
 
 // NewSendStream creates a new Stream for sending outgoing RTP and RTCP packets
 // over a QUIC stream.
-func (f *SendFlow) NewSendStream(ctx context.Context) (*RTPSendStream, error) {
+func (f *SendFlow) NewSendStream(ctx context.Context, priority uint32, incremantal bool) (*RTPSendStream, error) {
 	if err := f.isClosed(); err != nil {
 		return nil, err
 	}
@@ -72,6 +72,9 @@ func (f *SendFlow) NewSendStream(ctx context.Context) (*RTPSendStream, error) {
 	if err != nil {
 		return nil, err
 	}
+	s.SetPriority(priority)
+	s.SetIncremental(incremantal)
+
 	stream, err := newRTPSendStream(s, f.id, f.flowID, f.qlog)
 	if err != nil {
 		return nil, err
