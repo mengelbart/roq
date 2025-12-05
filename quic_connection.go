@@ -54,6 +54,14 @@ func (s *QuicGoSendStream) CancelWrite(c uint64) {
 	s.stream.CancelWrite(quic.StreamErrorCode(c))
 }
 
+func (s *QuicGoSendStream) SetPriority(p uint32) {
+	s.stream.SetPriority(p)
+}
+
+func (s *QuicGoSendStream) SetIncremental(b bool) {
+	s.stream.SetIncremental(b)
+}
+
 type QUICGoConnection struct {
 	conn *quic.Conn
 }

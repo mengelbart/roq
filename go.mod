@@ -1,6 +1,6 @@
 module github.com/mengelbart/roq
 
-go 1.24
+go 1.24.0
 
 require (
 	github.com/mengelbart/qlog v0.0.0-20250304144032-13728b0b6fae
@@ -20,5 +20,8 @@ require (
 	golang.org/x/crypto v0.41.0 // indirect
 	golang.org/x/net v0.43.0 // indirect
 	golang.org/x/sys v0.35.0 // indirect
+	golang.org/x/time v0.14.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
+
+replace github.com/quic-go/quic-go v0.57.1 => github.com/Willi-42/quic-go v0.7.1
