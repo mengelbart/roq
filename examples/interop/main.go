@@ -25,7 +25,6 @@ import (
 	"github.com/pion/rtp"
 	"github.com/pion/rtp/codecs"
 	"github.com/quic-go/quic-go"
-	"github.com/quic-go/quic-go/logging"
 	"github.com/quic-go/quic-go/qlog"
 )
 
@@ -111,7 +110,7 @@ func connect(ctx context.Context, f flags, keyLog io.Writer) (*quic.Conn, error)
 		}
 		listener, err := quic.ListenAddr(f.Addr, tlsConfig, &quic.Config{
 			EnableDatagrams: true,
-			Tracer:          qlogTracer,
+			Tracer:          qlog.DefaultConnectionTracer,
 		})
 		if err != nil {
 			return nil, err
@@ -128,7 +127,7 @@ func connect(ctx context.Context, f flags, keyLog io.Writer) (*quic.Conn, error)
 		KeyLogWriter:       keyLog,
 	}, &quic.Config{
 		EnableDatagrams: true,
-		Tracer:          qlogTracer,
+		Tracer:          qlog.DefaultConnectionTracer,
 	})
 	if err != nil {
 		return nil, err
@@ -306,36 +305,6 @@ func getQLOGWriter(id, vantagePoint string) io.WriteCloser {
 		return nil
 	}
 	return f
-}
-
-func qlogTracer(_ context.Context, p logging.Perspective, connID logging.ConnectionID) *logging.ConnectionTracer {
-	var label string
-	switch p {
-	case logging.PerspectiveClient:
-		label = "client"
-	case logging.PerspectiveServer:
-		label = "server"
-	}
-	return qlogDirTracer(p, connID, label)
-}
-
-func qlogDirTracer(p logging.Perspective, connID logging.ConnectionID, label string) *logging.ConnectionTracer {
-	qlogDir := os.Getenv("QLOGDIR")
-	if qlogDir == "" {
-		return nil
-	}
-	if _, err := os.Stat(qlogDir); os.IsNotExist(err) {
-		if err := os.MkdirAll(qlogDir, 0o755); err != nil {
-			log.Fatalf("failed to create qlog dir %s: %v", qlogDir, err)
-		}
-	}
-	path := fmt.Sprintf("%s/%s_%s.qlog", strings.TrimRight(qlogDir, "/"), connID, label)
-	f, err := os.Create(path)
-	if err != nil {
-		log.Printf("Failed to create qlog file %s: %s", path, err.Error())
-		return nil
-	}
-	return qlog.NewConnectionTracer(NewBufferedWriteCloser(bufio.NewWriter(f), f), p, connID)
 }
 
 type bufferedWriteCloser struct {
