@@ -54,8 +54,8 @@ type Session struct {
 }
 
 // NewSession creates a new roq session. QUIC connection is handled by roq.
-func NewSession(conn Connection, acceptDatagrams bool, qlogger *qlog.Logger) (*Session, error) {
-	s := newSession(conn, acceptDatagrams, qlogger)
+func NewSession(ctx context.Context, conn Connection, acceptDatagrams bool, qlogger *qlog.Logger) (*Session, error) {
+	s := newSession(ctx, conn, acceptDatagrams, qlogger)
 	s.start()
 
 	return s, nil
@@ -63,14 +63,14 @@ func NewSession(conn Connection, acceptDatagrams bool, qlogger *qlog.Logger) (*S
 
 // NewSessionWithAppHandeledConn creates a new roq session. QUIC connection is handled by application.
 // HandleDatagram and HandleUniStreamWithFlowID have to be  called for each datagram / new stream.
-func NewSessionWithAppHandeledConn(conn Connection, acceptDatagrams bool, qlogger *qlog.Logger) (*Session, error) {
-	s := newSession(conn, acceptDatagrams, qlogger)
+func NewSessionWithAppHandeledConn(ctx context.Context, conn Connection, acceptDatagrams bool, qlogger *qlog.Logger) (*Session, error) {
+	s := newSession(ctx, conn, acceptDatagrams, qlogger)
 
 	return s, nil
 }
 
-func newSession(conn Connection, acceptDatagrams bool, qlogger *qlog.Logger) *Session {
-	ctx, cancel := context.WithCancel(context.Background())
+func newSession(ctx context.Context, conn Connection, acceptDatagrams bool, qlogger *qlog.Logger) *Session {
+	ctx, cancel := context.WithCancel(ctx)
 	return &Session{
 		receiveBufferSize: defaultReceiveBufferSize,
 		acceptDatagrams:   acceptDatagrams,
@@ -133,7 +133,7 @@ func (s *Session) NewReceiveFlow(id uint64) (*ReceiveFlow, error) {
 	var f *ReceiveFlow
 	f = s.receiveFlowBuffer.pop(id)
 	if f == nil {
-		f = newReceiveFlow(id, s.receiveBufferSize, s.qlog)
+		f = newReceiveFlow(s.ctx, id, s.receiveBufferSize, s.qlog)
 	}
 	if err := s.receiveFlows.add(id, f); err != nil {
 		return nil, err
@@ -228,7 +228,7 @@ func (s *Session) HandleDatagram(datagram []byte) {
 	}
 	f := s.receiveFlowBuffer.get(flowID)
 	if f == nil {
-		f = newReceiveFlow(flowID, s.receiveBufferSize, s.qlog)
+		f = newReceiveFlow(s.ctx, flowID, s.receiveBufferSize, s.qlog)
 		s.receiveFlowBuffer.add(f)
 	}
 	b := f.bufferPool.Get().(*bytes.Buffer)
@@ -253,7 +253,7 @@ func (s *Session) HandleUniStreamWithFlowID(flowID uint64, rs ReceiveStream) {
 	}
 	f := s.receiveFlowBuffer.get(flowID)
 	if f == nil {
-		f = newReceiveFlow(flowID, s.receiveBufferSize, s.qlog)
+		f = newReceiveFlow(s.ctx, flowID, s.receiveBufferSize, s.qlog)
 		s.receiveFlowBuffer.add(f)
 	}
 	f.readStream(rs)
