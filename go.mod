@@ -23,5 +23,3 @@ require (
 	golang.org/x/time v0.14.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
-
-replace github.com/quic-go/quic-go v0.57.1 => github.com/Willi-42/quic-go v0.7.1

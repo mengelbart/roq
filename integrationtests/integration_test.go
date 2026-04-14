@@ -48,7 +48,7 @@ func TestIntegration(t *testing.T) {
 			sender := accept(t, ctx, l)
 			f, err := sender.NewSendFlow(0)
 			assert.NoError(t, err)
-			s, err := f.NewSendStream(ctx)
+			s, err := f.NewSendStream(ctx, 0, false)
 			assert.NoError(t, err)
 			for i := 0; i < 10; i++ {
 				pkt := rtp.Packet{
