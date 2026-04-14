@@ -42,7 +42,7 @@ func (s *sender) send(flowID uint64, reader FrameReader, packetizer rtp.Packetiz
 	}
 	var singleStream *roq.RTPSendStream
 	if sendMode == singleStreamMode {
-		singleStream, err = flow.NewSendStream(context.Background())
+		singleStream, err = flow.NewSendStream(context.Background(), 0, false)
 		if err != nil {
 			return err
 		}
@@ -64,7 +64,7 @@ func (s *sender) send(flowID uint64, reader FrameReader, packetizer rtp.Packetiz
 				return err
 			}
 		case streamPerFrameMode:
-			stream, err := flow.NewSendStream(context.Background())
+			stream, err := flow.NewSendStream(context.Background(), 0, false)
 			if err != nil {
 				return err
 			}

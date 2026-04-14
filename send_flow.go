@@ -2,6 +2,7 @@ package roq
 
 import (
 	"context"
+	"log/slog"
 	"sync"
 
 	"github.com/mengelbart/qlog"
@@ -72,8 +73,12 @@ func (f *SendFlow) NewSendStream(ctx context.Context, priority uint32, incremant
 	if err != nil {
 		return nil, err
 	}
-	s.SetPriority(priority)
-	s.SetIncremental(incremantal)
+	priorityStream, ok := s.(PrioritySendStream)
+	if ok {
+		slog.Info("roq setting stream priority", "priority", priority, "incremental", incremantal)
+		priorityStream.SetPriority(priority)
+		priorityStream.SetIncremental(incremantal)
+	}
 
 	stream, err := newRTPSendStream(s, f.id, f.flowID, f.qlog)
 	if err != nil {

@@ -104,7 +104,7 @@ func main() {
 			panic(ivfErr)
 		}
 
-		stream, err := flow.NewSendStream(context.Background())
+		stream, err := flow.NewSendStream(context.Background(), 0, false)
 		if err != nil {
 			panic(err)
 		}
