@@ -7,10 +7,6 @@ import (
 	"github.com/mengelbart/roq"
 )
 
-const (
-	bufferSize = 1 << 15
-)
-
 type receiver struct {
 	session *roq.Session
 }
