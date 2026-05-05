@@ -120,6 +120,6 @@ func main() {
 				panic(err)
 			}
 		}
-		stream.Close()
+		stream.Close() //nolint
 	}
 }

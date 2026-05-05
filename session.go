@@ -149,8 +149,8 @@ func (s *Session) NewReceiveFlow(id uint64) (*ReceiveFlow, error) {
 func (s *Session) close(code uint64, reason string) {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
-	s.sendFlows.rangeFn(func(_ uint64, v *SendFlow) { v.Close() })
-	s.receiveFlows.rangeFn(func(_ uint64, v *ReceiveFlow) { v.Close() })
+	s.sendFlows.rangeFn(func(_ uint64, v *SendFlow) { _ = v.Close() })
+	s.receiveFlows.rangeFn(func(_ uint64, v *ReceiveFlow) { _ = v.Close() })
 	_ = s.conn.CloseWithError(code, reason)
 	s.closedErr = SessionError{
 		code:   code,

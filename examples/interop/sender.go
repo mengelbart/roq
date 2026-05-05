@@ -46,9 +46,9 @@ func (s *sender) send(flowID uint64, reader FrameReader, packetizer rtp.Packetiz
 		if err != nil {
 			return err
 		}
-		defer singleStream.Close()
+		defer singleStream.Close() //nolint
 	}
-	defer flow.Close()
+	defer flow.Close() //nolint
 	for {
 		frame, err := reader.Read()
 		if err != nil {
