@@ -42,12 +42,12 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-	defer flow.Close()
+	defer flow.Close() //nolint
 	fileWriter, err := ivfwriter.New("output.ivf")
 	if err != nil {
 		panic(err)
 	}
-	defer fileWriter.Close()
+	defer fileWriter.Close() //nolint
 	for {
 		buf := make([]byte, 4096)
 		n, err := flow.Read(buf)

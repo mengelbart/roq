@@ -88,7 +88,7 @@ func setupAndRun() error {
 	if keyLog != nil {
 		defer func() {
 			log.Printf("closing keylog")
-			keyLog.Close()
+			keyLog.Close() //nolint
 		}()
 	}
 	conn, err := connect(context.Background(), f, keyLog)
@@ -142,7 +142,7 @@ func runSender(f flags, conn *quic.Conn) error {
 	}
 	qlogfile := getQLOGWriter("roq", role)
 	if qlogfile != nil {
-		defer qlogfile.Close()
+		defer qlogfile.Close() //nolint
 	}
 	var qlogger *mqlog.Logger
 	if qlogfile != nil {
@@ -178,7 +178,9 @@ func runSender(f flags, conn *quic.Conn) error {
 		return ffmpeg.Process.Kill()
 	}
 	time.Sleep(time.Second)
-	s.Close()
+	if err = s.Close(); err != nil {
+		return err
+	}
 	return ffmpeg.Wait()
 }
 
@@ -189,7 +191,7 @@ func runReceiver(f flags, conn *quic.Conn) error {
 	}
 	qlogfile := getQLOGWriter("roq", role)
 	if qlogfile != nil {
-		defer qlogfile.Close()
+		defer qlogfile.Close() //nolint
 	}
 	var qlogger *mqlog.Logger
 	if qlogfile != nil {
@@ -221,7 +223,7 @@ func runReceiver(f flags, conn *quic.Conn) error {
 			log.Println("WAITING FOR FFPLAY")
 			//state, err := ffplay.Process.Wait()
 			//log.Printf("ffmpeg returned %v, err: %v", state, err)
-			ffplay.Process.Kill()
+			ffplay.Process.Kill() //nolint
 		}()
 		writer, err = newIVFWriterWith(stdout, f.Codec)
 		if err != nil {

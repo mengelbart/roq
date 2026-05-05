@@ -30,8 +30,8 @@ func (r *receiver) receive(flowID uint64, writer io.WriteCloser) error {
 	if err != nil {
 		return err
 	}
-	defer flow.Close()
-	defer writer.Close()
+	defer flow.Close()   //nolint
+	defer writer.Close() //nolint
 	_, err = io.Copy(writer, flow)
 	return err
 }
