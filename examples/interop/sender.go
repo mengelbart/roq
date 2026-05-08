@@ -26,7 +26,7 @@ type sender struct {
 }
 
 func newSender(conn roq.Connection, qlog *qlog.Logger) (*sender, error) {
-	session, err := roq.NewSession(conn, true, qlog)
+	session, err := roq.NewSession(context.Background(), conn, true, qlog)
 	if err != nil {
 		return nil, err
 	}

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"io"
 
 	"github.com/mengelbart/qlog"
@@ -12,7 +13,7 @@ type receiver struct {
 }
 
 func newReceiver(conn roq.Connection, qlog *qlog.Logger) (*receiver, error) {
-	session, err := roq.NewSession(conn, true, qlog)
+	session, err := roq.NewSession(context.Background(), conn, true, qlog)
 	if err != nil {
 		return nil, err
 	}

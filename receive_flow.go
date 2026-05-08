@@ -25,8 +25,8 @@ type ReceiveFlow struct {
 	qlog       *qlog.Logger
 }
 
-func newReceiveFlow(id uint64, receiveBufferSize int, qlog *qlog.Logger) *ReceiveFlow {
-	ctx, cancel := context.WithCancel(context.Background())
+func newReceiveFlow(ctx context.Context, id uint64, receiveBufferSize int, qlog *qlog.Logger) *ReceiveFlow {
+	ctx, cancel := context.WithCancel(ctx)
 	return &ReceiveFlow{
 		id:     id,
 		buffer: make(chan *bytes.Buffer, receiveBufferSize),
