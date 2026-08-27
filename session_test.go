@@ -11,9 +11,10 @@ import (
 
 // stubSendStream is a SendStream that records writes and closes.
 type stubSendStream struct {
-	id     int64
-	mutex  sync.Mutex
-	closed bool
+	id       int64
+	closeErr error
+	mutex    sync.Mutex
+	closed   bool
 }
 
 func (s *stubSendStream) Write(p []byte) (int, error) { return len(p), nil }
@@ -23,7 +24,13 @@ func (s *stubSendStream) Close() error {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
 	s.closed = true
-	return nil
+	return s.closeErr
+}
+
+func (s *stubSendStream) isClosed() bool {
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+	return s.closed
 }
 
 // stubReceiveStream feeds a fixed payload. Once it is exhausted the stream
@@ -68,11 +75,15 @@ type stubConn struct {
 	datagrams chan []byte
 	streams   chan ReceiveStream
 
-	mutex      sync.Mutex
-	closeCount int
-	closeCode  uint64
-	closeOnce  sync.Once
-	closed     chan struct{}
+	// sendCloseErr is returned by every send stream this connection opens.
+	sendCloseErr error
+
+	mutex       sync.Mutex
+	sendStreams []*stubSendStream
+	closeCount  int
+	closeCode   uint64
+	closeOnce   sync.Once
+	closed      chan struct{}
 }
 
 func newStubConn() *stubConn {
@@ -95,7 +106,11 @@ func (c *stubConn) ReceiveDatagram(ctx context.Context) ([]byte, error) {
 }
 
 func (c *stubConn) OpenUniStreamSync(context.Context) (SendStream, error) {
-	return &stubSendStream{id: 1}, nil
+	c.mutex.Lock()
+	defer c.mutex.Unlock()
+	s := &stubSendStream{id: int64(len(c.sendStreams) + 1), closeErr: c.sendCloseErr}
+	c.sendStreams = append(c.sendStreams, s)
+	return s, nil
 }
 
 func (c *stubConn) AcceptUniStream(ctx context.Context) (ReceiveStream, error) {

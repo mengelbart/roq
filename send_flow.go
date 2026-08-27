@@ -2,6 +2,7 @@ package roq
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"sync"
 
@@ -102,18 +103,19 @@ func (f *SendFlow) isClosed() error {
 	return f.closedErr
 }
 
-// Close closes the flow and all associated streams.
+// Close closes the flow and all associated streams. Every stream is closed
+// even if an earlier one failed to close; the errors are joined and returned.
+// The flow is marked closed and removed from the session in either case.
 func (f *SendFlow) Close() error {
 	f.lock.Lock()
 	defer f.lock.Unlock()
+	errs := make([]error, 0, len(f.streams))
 	for _, s := range f.streams {
-		if err := s.Close(); err != nil {
-			return err
-		}
+		errs = append(errs, s.Close())
 	}
 	f.onClose()
 	f.closedErr = errClosed
-	return nil
+	return errors.Join(errs...)
 }
 
 func (f *SendFlow) ID() uint64 {
