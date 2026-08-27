@@ -66,6 +66,14 @@ func (f *ReceiveFlow) readStream(rs ReceiveStream) {
 	f.streams[rs.ID()] = rs
 	f.lock.Unlock()
 
+	// Unregister on exit, so that flows reading a stream per frame do not
+	// accumulate finished streams for the lifetime of the session.
+	defer func() {
+		f.lock.Lock()
+		defer f.lock.Unlock()
+		delete(f.streams, rs.ID())
+	}()
+
 	reader := quicvarint.NewReader(rs)
 	for {
 		length, err := quicvarint.Read(reader)
