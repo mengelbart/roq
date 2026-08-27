@@ -48,17 +48,22 @@ func (b *receiveFlowBuffer) get(id uint64) *ReceiveFlow {
 	return f
 }
 
+// pop removes the flow with the given ID from the buffer and returns it, or
+// nil if the buffer holds no such flow. The returned flow is no longer subject
+// to eviction.
 func (b *receiveFlowBuffer) pop(id uint64) *ReceiveFlow {
 	b.mutex.Lock()
 	defer b.mutex.Unlock()
 	i := slices.IndexFunc(b.queue, func(f uint64) bool {
 		return f == id
 	})
-	if i >= 0 && i < len(b.queue) {
-		b.queue = slices.Delete(b.queue, i, i)
+	if i >= 0 {
+		b.queue = slices.Delete(b.queue, i, i+1)
 	}
-	if f, ok := b.buffer[id]; ok {
-		return f
+	f, ok := b.buffer[id]
+	if !ok {
+		return nil
 	}
-	return nil
+	delete(b.buffer, id)
+	return f
 }
