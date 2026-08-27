@@ -52,13 +52,17 @@ func (f *ReceiveFlow) push(packet *bytes.Buffer) {
 }
 
 func (f *ReceiveFlow) readStream(rs ReceiveStream) {
+	// Checking for closure and registering the stream must be atomic with
+	// respect to closeWithError: a stream registered after it has run would
+	// never be cancelled, and readStream below would block forever.
+	f.lock.Lock()
 	select {
 	case <-f.ctx.Done():
+		f.lock.Unlock()
 		rs.CancelRead(ErrRoQNoError)
 		return
 	default:
 	}
-	f.lock.Lock()
 	f.streams[rs.ID()] = rs
 	f.lock.Unlock()
 
@@ -130,6 +134,8 @@ func (f *ReceiveFlow) ID() uint64 {
 }
 
 func (f *ReceiveFlow) closeWithError(code uint64) {
+	f.lock.Lock()
+	defer f.lock.Unlock()
 	for _, s := range f.streams {
 		s.CancelRead(code)
 	}

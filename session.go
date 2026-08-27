@@ -93,22 +93,22 @@ func newSession(conn Connection, acceptDatagrams bool, qlogger *qlog.Logger) *Se
 }
 
 func (s *Session) start() {
+	// The receive loops run until the session context is cancelled or the
+	// connection fails, and only ever return a non-nil error describing why.
+	// There is nothing left to act on here: close has already run by then, or
+	// is what stopped them in the first place.
 	if s.acceptDatagrams {
 		s.wg.Add(1)
 		go func() {
 			defer s.wg.Done()
-			if err := s.receiveDatagrams(); err != nil {
-				return
-			}
+			_ = s.receiveDatagrams()
 		}()
 	}
 
 	s.wg.Add(1)
 	go func() {
 		defer s.wg.Done()
-		if err := s.receiveUniStreams(); err != nil {
-			return
-		}
+		_ = s.receiveUniStreams()
 	}()
 }
 
@@ -146,18 +146,26 @@ func (s *Session) NewReceiveFlow(id uint64) (*ReceiveFlow, error) {
 	return f, nil
 }
 
+// close initiates the session shutdown: it tears down all flows, closes the
+// QUIC connection and cancels the session context, which makes the receive
+// loops return. It is idempotent, and the first caller's error code wins.
+//
+// close does not wait for the receive loops to return, so it is safe to call
+// from the receive loops themselves. Use Close to also wait for them.
 func (s *Session) close(code uint64, reason string) {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
-	s.sendFlows.rangeFn(func(_ uint64, v *SendFlow) { _ = v.Close() })
-	s.receiveFlows.rangeFn(func(_ uint64, v *ReceiveFlow) { _ = v.Close() })
-	_ = s.conn.CloseWithError(code, reason)
+	if s.closedErr != nil {
+		return
+	}
 	s.closedErr = SessionError{
 		code:   code,
 		reason: reason,
 	}
+	s.sendFlows.rangeFn(func(_ uint64, v *SendFlow) { _ = v.Close() })
+	s.receiveFlows.rangeFn(func(_ uint64, v *ReceiveFlow) { _ = v.Close() })
+	_ = s.conn.CloseWithError(code, reason)
 	s.cancelCtx()
-	s.wg.Wait()
 }
 
 func (s *Session) isClosed() error {
@@ -170,8 +178,11 @@ func (s *Session) closeWithError(code uint64, reason string) {
 	s.close(code, reason)
 }
 
+// Close closes the session and waits for its receive loops to return. It must
+// not be called from a callback running on one of those loops.
 func (s *Session) Close() error {
 	s.close(ErrRoQNoError, "")
+	s.wg.Wait()
 	return nil
 }
 
