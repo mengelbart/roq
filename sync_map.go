@@ -2,6 +2,7 @@ package roq
 
 import (
 	"errors"
+	"maps"
 	"sync"
 )
 
@@ -40,10 +41,14 @@ func (m *syncMap[K, V]) delete(k K) {
 	delete(m.elements, k)
 }
 
+// rangeFn calls f for every element in the map. f is called without the map
+// lock held, so it may add to or delete from the map. f therefore observes a
+// snapshot taken at the time of the call, not the live map.
 func (m *syncMap[K, V]) rangeFn(f func(k K, v V)) {
 	m.mutex.Lock()
-	defer m.mutex.Unlock()
-	for k, v := range m.elements {
+	elements := maps.Clone(m.elements)
+	m.mutex.Unlock()
+	for k, v := range elements {
 		f(k, v)
 	}
 }
