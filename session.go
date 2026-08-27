@@ -242,11 +242,7 @@ func (s *Session) HandleDatagram(datagram []byte) {
 		f.push(b)
 		return
 	}
-	f := s.receiveFlowBuffer.get(flowID)
-	if f == nil {
-		f = newReceiveFlow(flowID, s.receiveBufferSize, s.qlog)
-		s.receiveFlowBuffer.add(f)
-	}
+	f := s.receiveFlowBuffer.getOrCreate(flowID, s.receiveBufferSize, s.qlog)
 	b := f.bufferPool.Get().(*bytes.Buffer)
 	b.Reset()
 	b.Write(datagram[quicvarint.Len(flowID):])
@@ -267,11 +263,7 @@ func (s *Session) HandleUniStreamWithFlowID(flowID uint64, rs ReceiveStream) {
 		f.readStream(rs)
 		return
 	}
-	f := s.receiveFlowBuffer.get(flowID)
-	if f == nil {
-		f = newReceiveFlow(flowID, s.receiveBufferSize, s.qlog)
-		s.receiveFlowBuffer.add(f)
-	}
+	f := s.receiveFlowBuffer.getOrCreate(flowID, s.receiveBufferSize, s.qlog)
 	f.readStream(rs)
 }
 
