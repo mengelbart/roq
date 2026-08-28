@@ -194,7 +194,8 @@ func closeWithin(t *testing.T, s *Session, timeout time.Duration) {
 	}
 }
 
-// A datagram with an unparseable flow ID must not deadlock the session.
+// QUIC delivers datagrams intact, so a datagram with an unparseable flow ID is
+// a protocol violation by the sender and closes the session.
 func TestCloseAfterMalformedDatagram(t *testing.T) {
 	c := newStubConn()
 	s, err := NewSession(c, true, nil)
@@ -215,22 +216,28 @@ func TestCloseAfterMalformedDatagram(t *testing.T) {
 	}
 }
 
-// A stream that ends before delivering a flow ID must not deadlock the session.
-func TestCloseAfterMalformedStreamHeader(t *testing.T) {
+// A stream that ends or is reset before delivering a flow ID is dropped: the
+// peer cancelling one frame must not tear down the session.
+func TestMalformedStreamHeaderIsDropped(t *testing.T) {
 	c := newStubConn()
 	s, err := NewSession(c, true, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	// A stream that ends before delivering a complete flow ID varint.
-	c.streams <- &stubReceiveStream{id: 3, eof: true, cancelled: make(chan struct{})}
-	c.awaitClose(t)
+	rs := &stubReceiveStream{id: 3, eof: true, cancelled: make(chan struct{})}
+	c.streams <- rs
+
+	select {
+	case <-rs.cancelled:
+	case <-time.After(5 * time.Second):
+		t.Fatal("stream was never cancelled")
+	}
+	if n, _ := c.closes(); n != 0 {
+		t.Errorf("connection closed %d times, want 0", n)
+	}
 
 	closeWithin(t, s, 5*time.Second)
-
-	if n, code := c.closes(); n != 1 || code != ErrRoQPacketError {
-		t.Errorf("closes = (%d, %d), want (1, ErrRoQPacketError)", n, code)
-	}
 }
 
 // Close must tear down open send flows without deadlocking on the flow map.
