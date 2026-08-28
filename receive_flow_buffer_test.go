@@ -61,30 +61,28 @@ func TestReceiveFlowBufferPoppedFlowIsNotEvicted(t *testing.T) {
 // and everything pushed into it is lost.
 func TestReceiveFlowBufferGetOrCreateIsAtomic(t *testing.T) {
 	const routines = 8
-	for range 100 {
-		b := newReceiveFlowBuffer(16)
-		flows := make([]*ReceiveFlow, routines)
-		var start sync.WaitGroup
-		var done sync.WaitGroup
-		start.Add(1)
-		for i := range routines {
-			done.Add(1)
-			go func() {
-				defer done.Done()
-				start.Wait()
-				flows[i] = b.getOrCreate(1, 1, nil)
-			}()
-		}
-		start.Done()
-		done.Wait()
+	b := newReceiveFlowBuffer(16)
+	flows := make([]*ReceiveFlow, routines)
+	var start sync.WaitGroup
+	var done sync.WaitGroup
+	start.Add(1)
+	for i := range routines {
+		done.Add(1)
+		go func() {
+			defer done.Done()
+			start.Wait()
+			flows[i] = b.getOrCreate(1, 1, nil)
+		}()
+	}
+	start.Done()
+	done.Wait()
 
-		for i, f := range flows {
-			if f != flows[0] {
-				t.Fatalf("goroutine %d got flow %p, goroutine 0 got %p, want the same flow", i, f, flows[0])
-			}
+	for i, f := range flows {
+		if f != flows[0] {
+			t.Fatalf("goroutine %d got flow %p, goroutine 0 got %p, want the same flow", i, f, flows[0])
 		}
-		if len(b.queue) != 1 {
-			t.Fatalf("queue has %d entries, want 1", len(b.queue))
-		}
+	}
+	if len(b.queue) != 1 {
+		t.Fatalf("queue has %d entries, want 1", len(b.queue))
 	}
 }

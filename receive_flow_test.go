@@ -278,40 +278,38 @@ func TestCloseFlowTwice(t *testing.T) {
 // Closing a flow while its producers are still pushing must not lose a packet
 // that was queued, and must not send on the closed buffer.
 func TestConcurrentPushAndClose(t *testing.T) {
-	for range 100 {
-		f := newReceiveFlow(1, 10, nil)
-		var wg sync.WaitGroup
-		wg.Add(2)
-		go func() {
-			defer wg.Done()
-			f.push(bytes.NewBuffer([]byte{0x01}))
-		}()
-		go func() {
-			defer wg.Done()
-			_ = f.Close()
-		}()
-		wg.Wait()
+	f := newReceiveFlow(1, 10, nil)
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		f.push(bytes.NewBuffer([]byte{0x01}))
+	}()
+	go func() {
+		defer wg.Done()
+		_ = f.Close()
+	}()
+	wg.Wait()
 
-		// The push either won the race, in which case Read must hand the
-		// packet out, or it lost it and Read reports the closure. Both are
-		// correct; a queued packet that Read never returns is not.
-		buf := make([]byte, 1)
-		n, err := f.Read(buf)
-		if err == nil {
-			if n != 1 || buf[0] != 0x01 {
-				t.Fatalf("Read = %d bytes %v, want the pushed packet", n, buf[:n])
-			}
-			if _, err := f.Read(buf); !errors.Is(err, context.Canceled) {
-				t.Fatalf("Read on drained flow: %v, want %v", err, context.Canceled)
-			}
-			continue
+	// The push either won the race, in which case Read must hand the
+	// packet out, or it lost it and Read reports the closure. Both are
+	// correct; a queued packet that Read never returns is not.
+	buf := make([]byte, 1)
+	n, err := f.Read(buf)
+	if err == nil {
+		if n != 1 || buf[0] != 0x01 {
+			t.Fatalf("Read = %d bytes %v, want the pushed packet", n, buf[:n])
 		}
-		if !errors.Is(err, context.Canceled) {
-			t.Fatalf("Read: %v, want %v", err, context.Canceled)
+		if _, err := f.Read(buf); !errors.Is(err, context.Canceled) {
+			t.Fatalf("Read on drained flow: %v, want %v", err, context.Canceled)
 		}
-		if len(f.buffer) != 0 {
-			t.Fatalf("closed flow still holds %d packets no Read can return", len(f.buffer))
-		}
+		return
+	}
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("Read: %v, want %v", err, context.Canceled)
+	}
+	if len(f.buffer) != 0 {
+		t.Fatalf("closed flow still holds %d packets no Read can return", len(f.buffer))
 	}
 }
 

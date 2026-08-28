@@ -1,7 +1,6 @@
 package roq
 
 import (
-	"errors"
 	"maps"
 	"sync"
 )
@@ -18,14 +17,23 @@ func newSyncMap[K comparable, V any]() *syncMap[K, V] {
 	}
 }
 
-func (m *syncMap[K, V]) add(k K, v V) error {
+// getOrInsert returns the value stored under k, inserting v if the map holds
+// no entry for k yet. The second return value reports whether v was inserted.
+func (m *syncMap[K, V]) getOrInsert(k K, v V) (V, bool) {
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
-	if _, ok := m.elements[k]; ok {
-		return errors.New("duplicate entry")
+	if old, ok := m.elements[k]; ok {
+		return old, false
 	}
 	m.elements[k] = v
-	return nil
+	return v, true
+}
+
+// set stores v under k, replacing any entry the map holds for k.
+func (m *syncMap[K, V]) set(k K, v V) {
+	m.mutex.Lock()
+	defer m.mutex.Unlock()
+	m.elements[k] = v
 }
 
 func (m *syncMap[K, V]) get(k K) (V, bool) {

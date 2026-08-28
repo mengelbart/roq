@@ -3,7 +3,6 @@ package roq
 import (
 	"bytes"
 	"context"
-	"errors"
 	"io"
 	"sync"
 
@@ -46,6 +45,7 @@ type Session struct {
 	sendFlows         *syncMap[uint64, *SendFlow]
 	receiveFlows      *syncMap[uint64, *ReceiveFlow]
 	receiveFlowBuffer *receiveFlowBuffer
+	receiveFlowsMutex sync.Mutex
 
 	mutex sync.Mutex
 	// closedErr is the SessionError reported by operations on the closed
@@ -101,6 +101,7 @@ func newSession(conn Connection, acceptDatagrams bool, qlogger *qlog.Logger, con
 		sendFlows:         newSyncMap[uint64, *SendFlow](),
 		receiveFlows:      newSyncMap[uint64, *ReceiveFlow](),
 		receiveFlowBuffer: newReceiveFlowBuffer(config.unknownFlowBufferSize),
+		receiveFlowsMutex: sync.Mutex{},
 		mutex:             sync.Mutex{},
 		closedErr:         nil,
 		wg:                sync.WaitGroup{},
@@ -134,14 +135,11 @@ func (s *Session) NewSendFlow(id uint64) (*SendFlow, error) {
 	if err := s.isClosed(); err != nil {
 		return nil, err
 	}
-	if _, ok := s.sendFlows.get(id); ok {
-		return nil, errors.New("duplicate flow ID")
-	}
 	f := newFlow(s.conn, id, func() {
 		s.sendFlows.delete(id)
 	}, s.qlog)
-	if err := s.sendFlows.add(id, f); err != nil {
-		return nil, err
+	if _, ok := s.sendFlows.getOrInsert(id, f); !ok {
+		return nil, errDuplicateFlowID
 	}
 	return f, nil
 }
@@ -150,17 +148,16 @@ func (s *Session) NewReceiveFlow(id uint64) (*ReceiveFlow, error) {
 	if err := s.isClosed(); err != nil {
 		return nil, err
 	}
+	s.receiveFlowsMutex.Lock()
+	defer s.receiveFlowsMutex.Unlock()
 	if _, ok := s.receiveFlows.get(id); ok {
-		return nil, errors.New("duplicate flow ID")
+		return nil, errDuplicateFlowID
 	}
-	var f *ReceiveFlow
-	f = s.receiveFlowBuffer.pop(id)
+	f := s.receiveFlowBuffer.pop(id)
 	if f == nil {
 		f = newReceiveFlow(id, s.receiveBufferSize, s.qlog)
 	}
-	if err := s.receiveFlows.add(id, f); err != nil {
-		return nil, err
-	}
+	s.receiveFlows.set(id, f)
 	return f, nil
 }
 
@@ -234,6 +231,15 @@ func (s *Session) receiveDatagrams() error {
 	}
 }
 
+func (s *Session) receiveFlow(flowID uint64) *ReceiveFlow {
+	s.receiveFlowsMutex.Lock()
+	defer s.receiveFlowsMutex.Unlock()
+	if f, ok := s.receiveFlows.get(flowID); ok {
+		return f
+	}
+	return s.receiveFlowBuffer.getOrCreate(flowID, s.receiveBufferSize, s.qlog)
+}
+
 // HandleDatagram handles a datagram. If QUIC connection is handled by the
 // application, this function has to be called by the application for each
 // datagram that belongs to the roq connection.
@@ -259,14 +265,7 @@ func (s *Session) HandleDatagram(datagram []byte) {
 			},
 		})
 	}
-	if f, ok := s.receiveFlows.get(flowID); ok {
-		b := f.bufferPool.Get().(*bytes.Buffer)
-		b.Reset()
-		b.Write(datagram[quicvarint.Len(flowID):])
-		f.push(b)
-		return
-	}
-	f := s.receiveFlowBuffer.getOrCreate(flowID, s.receiveBufferSize, s.qlog)
+	f := s.receiveFlow(flowID)
 	b := f.bufferPool.Get().(*bytes.Buffer)
 	b.Reset()
 	b.Write(datagram[quicvarint.Len(flowID):])
@@ -284,12 +283,7 @@ func (s *Session) HandleUniStreamWithFlowID(flowID uint64, rs ReceiveStream) {
 			StreamID: uint64(rs.ID()),
 		})
 	}
-	if f, ok := s.receiveFlows.get(flowID); ok {
-		f.readStream(rs)
-		return
-	}
-	f := s.receiveFlowBuffer.getOrCreate(flowID, s.receiveBufferSize, s.qlog)
-	f.readStream(rs)
+	s.receiveFlow(flowID).readStream(rs)
 }
 
 func (s *Session) handleUniStream(rs ReceiveStream) {
