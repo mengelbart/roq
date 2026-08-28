@@ -12,8 +12,6 @@ import (
 	"github.com/quic-go/quic-go/quicvarint"
 )
 
-const defaultReceiveBufferSize = 1024 // Number of packets to buffer
-
 type SendStream interface {
 	io.Writer
 	io.Closer
@@ -62,12 +60,16 @@ type Session struct {
 }
 
 // NewSession creates a new roq session. QUIC connection is handled by roq.
-// It returns an error if conn is nil.
-func NewSession(conn Connection, acceptDatagrams bool, qlogger *qlog.Logger) (*Session, error) {
+// It returns an error if conn is nil or if an option is invalid.
+func NewSession(conn Connection, acceptDatagrams bool, qlogger *qlog.Logger, opts ...Option) (*Session, error) {
 	if conn == nil {
 		return nil, errNilConnection
 	}
-	s := newSession(conn, acceptDatagrams, qlogger)
+	config, err := newSessionConfig(opts)
+	if err != nil {
+		return nil, err
+	}
+	s := newSession(conn, acceptDatagrams, qlogger, config)
 	s.start()
 
 	return s, nil
@@ -76,25 +78,29 @@ func NewSession(conn Connection, acceptDatagrams bool, qlogger *qlog.Logger) (*S
 // NewSessionWithAppHandledConn creates a new roq session. QUIC connection is
 // handled by the application. HandleDatagram and HandleUniStreamWithFlowID have
 // to be called for each datagram / new stream. It returns an error if conn is
-// nil.
-func NewSessionWithAppHandledConn(conn Connection, acceptDatagrams bool, qlogger *qlog.Logger) (*Session, error) {
+// nil or if an option is invalid.
+func NewSessionWithAppHandledConn(conn Connection, acceptDatagrams bool, qlogger *qlog.Logger, opts ...Option) (*Session, error) {
 	if conn == nil {
 		return nil, errNilConnection
 	}
-	s := newSession(conn, acceptDatagrams, qlogger)
+	config, err := newSessionConfig(opts)
+	if err != nil {
+		return nil, err
+	}
+	s := newSession(conn, acceptDatagrams, qlogger, config)
 
 	return s, nil
 }
 
-func newSession(conn Connection, acceptDatagrams bool, qlogger *qlog.Logger) *Session {
+func newSession(conn Connection, acceptDatagrams bool, qlogger *qlog.Logger, config *sessionConfig) *Session {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &Session{
-		receiveBufferSize: defaultReceiveBufferSize,
+		receiveBufferSize: config.receiveBufferSize,
 		acceptDatagrams:   acceptDatagrams,
 		conn:              conn,
 		sendFlows:         newSyncMap[uint64, *SendFlow](),
 		receiveFlows:      newSyncMap[uint64, *ReceiveFlow](),
-		receiveFlowBuffer: newReceiveFlowBuffer(16),
+		receiveFlowBuffer: newReceiveFlowBuffer(config.unknownFlowBufferSize),
 		mutex:             sync.Mutex{},
 		closedErr:         nil,
 		wg:                sync.WaitGroup{},
