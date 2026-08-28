@@ -35,3 +35,12 @@ jobs:
       run: go build -v ./...
     - name: Test
       run: go test -v -race ./...
+    - name: Coverage
+      if: matrix.go == '1.27.x'
+      run: make cover-check
+    - name: Upload coverage profile
+      if: matrix.go == '1.27.x'
+      uses: actions/upload-artifact@v4
+      with:
+        name: coverage
+        path: cover.lib.out
