@@ -10,8 +10,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/mengelbart/qlog"
-	roqqlog "github.com/mengelbart/qlog/roq"
+	"github.com/mengelbart/roq/qlog"
 	"github.com/quic-go/quic-go"
 	"github.com/quic-go/quic-go/quicvarint"
 )
@@ -39,10 +38,10 @@ type ReceiveFlow struct {
 	deadlineExpired bool
 	deadlineTimer   *time.Timer
 
-	qlog *qlog.Logger
+	qlog *qlogger
 }
 
-func newReceiveFlow(id uint64, receiveBufferSize int, qlog *qlog.Logger) *ReceiveFlow {
+func newReceiveFlow(id uint64, receiveBufferSize int, qlog *qlogger) *ReceiveFlow {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &ReceiveFlow{
 		id:     id,
@@ -102,8 +101,9 @@ func (f *ReceiveFlow) readStream(rs ReceiveStream) {
 	}()
 
 	reader := quicvarint.NewReader(rs)
+	var lengthBuf [8]byte
 	for {
-		length, err := quicvarint.Read(reader)
+		length, encodedLength, err := readVarint(reader, lengthBuf[:])
 		if err != nil {
 			if errors.Is(err, io.EOF) {
 				return
@@ -119,6 +119,9 @@ func (f *ReceiveFlow) readStream(rs ReceiveStream) {
 		r := io.LimitReader(reader, int64(length))
 		b := f.bufferPool.Get().(*bytes.Buffer)
 		b.Reset()
+		// The buffer holds the frame as it was on the wire, prefix included,
+		// until the packet is handed to the flow below.
+		b.Write(encodedLength)
 		n, err := b.ReadFrom(r)
 		if err != nil {
 			var streamErr *quic.StreamError
@@ -130,24 +133,47 @@ func (f *ReceiveFlow) readStream(rs ReceiveStream) {
 			return
 		}
 		if f.qlog != nil {
-			raw := make([]byte, b.Len())
-			n := copy(raw, b.Bytes())
-			f.qlog.Log(roqqlog.StreamPacketEvent{
-				EventName: roqqlog.StreamPacketEventTypeParsed,
-				StreamID:  rs.ID(),
-				Packet: roqqlog.Packet{
+			f.qlog.record(qlog.StreamPacketParsed{
+				StreamID: uint64(rs.ID()),
+				Packet: qlog.Packet{
 					FlowID: f.id,
-					Length: length,
-					Raw: &qlog.RawInfo{
-						Length:        length,
+					Length: uint64(b.Len()),
+					Raw: qlog.RawInfo{
+						Length:        uint64(b.Len()),
 						PayloadLength: length,
-						Data:          raw[:n],
+						Data:          f.qlog.rawData(b.Bytes()),
 					},
 				},
 			})
 		}
+		// Skip the prefix again: the flow hands out RTP and RTCP packets.
+		b.Next(len(encodedLength))
 		f.push(b)
 	}
+}
+
+// readVarint reads a QUIC varint from r and returns its value together with the
+// bytes it was encoded in, which alias buf. buf must have room for 8 bytes.
+//
+// A QUIC varint is not required to use the shortest encoding of its value (RFC
+// 9000, Section 16), so the encoding cannot be reconstructed from the value
+// alone. Keeping it lets the qlog events report the frame as it was on the
+// wire rather than as this implementation would have written it.
+func readVarint(r quicvarint.Reader, buf []byte) (uint64, []byte, error) {
+	firstByte, err := r.ReadByte()
+	if err != nil {
+		return 0, nil, err
+	}
+	// The first two bits of the first byte encode the length.
+	buf = buf[:1<<(firstByte>>6)]
+	buf[0] = firstByte
+	if len(buf) > 1 {
+		if _, err := io.ReadFull(r, buf[1:]); err != nil {
+			return 0, nil, err
+		}
+	}
+	v, _, err := quicvarint.Parse(buf)
+	return v, buf, err
 }
 
 // Read reads the next RTP packet of the flow into buf. Packets are not split

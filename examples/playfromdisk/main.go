@@ -13,11 +13,11 @@ import (
 	"time"
 
 	"github.com/mengelbart/roq"
+	"github.com/mengelbart/roq/qlog"
 	"github.com/pion/rtp"
 	"github.com/pion/rtp/codecs"
 	"github.com/pion/webrtc/v3/pkg/media/ivfreader"
 	"github.com/quic-go/quic-go"
-	"github.com/quic-go/quic-go/qlog"
 )
 
 const (
@@ -81,10 +81,12 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-	session, err := roq.NewSession(roq.NewQUICGoConnection(conn), true, nil)
+	session, err := roq.NewSession(roq.NewQUICGoConnection(conn), true)
 	if err != nil {
 		panic(err)
 	}
+	// Closing the session finishes the qlog trace of the connection.
+	defer session.Close() //nolint
 
 	flow, err := session.NewSendFlow(0)
 	if err != nil {
@@ -97,7 +99,7 @@ func main() {
 		frame, _, ivfErr := ivf.ParseNextFrame()
 		if errors.Is(ivfErr, io.EOF) {
 			fmt.Printf("All video frames parsed and sent")
-			os.Exit(0)
+			return
 		}
 
 		if ivfErr != nil {

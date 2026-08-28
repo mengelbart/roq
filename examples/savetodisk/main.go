@@ -7,10 +7,10 @@ import (
 	"log"
 
 	"github.com/mengelbart/roq"
+	"github.com/mengelbart/roq/qlog"
 	"github.com/pion/rtp"
 	"github.com/pion/webrtc/v3/pkg/media/ivfwriter"
 	"github.com/quic-go/quic-go"
-	"github.com/quic-go/quic-go/qlog"
 )
 
 func main() {
@@ -34,10 +34,12 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-	session, err := roq.NewSession(roq.NewQUICGoConnection(conn), true, nil)
+	session, err := roq.NewSession(roq.NewQUICGoConnection(conn), true)
 	if err != nil {
 		panic(err)
 	}
+	// Closing the session finishes the qlog trace of the connection.
+	defer session.Close() //nolint
 	flow, err := session.NewReceiveFlow(0)
 	if err != nil {
 		panic(err)

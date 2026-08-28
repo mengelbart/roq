@@ -3,8 +3,6 @@ package roq
 import (
 	"slices"
 	"sync"
-
-	"github.com/mengelbart/qlog"
 )
 
 type receiveFlowBuffer struct {
@@ -28,7 +26,7 @@ func newReceiveFlowBuffer(maxLen int) *receiveFlowBuffer {
 // flow if the buffer holds none. Lookup and creation happen under a single
 // lock hold, so concurrent callers for the same unknown flow ID all get the
 // same flow.
-func (b *receiveFlowBuffer) getOrCreate(id uint64, receiveBufferSize int, qlogger *qlog.Logger) *ReceiveFlow {
+func (b *receiveFlowBuffer) getOrCreate(id uint64, receiveBufferSize int, qlog *qlogger) *ReceiveFlow {
 	b.mutex.Lock()
 	defer b.mutex.Unlock()
 	if f, ok := b.buffer[id]; ok {
@@ -43,7 +41,7 @@ func (b *receiveFlowBuffer) getOrCreate(id uint64, receiveBufferSize int, qlogge
 		delete(b.buffer, front)
 		b.queue = b.queue[1:]
 	}
-	f := newReceiveFlow(id, receiveBufferSize, qlogger)
+	f := newReceiveFlow(id, receiveBufferSize, qlog)
 	b.queue = append(b.queue, id)
 	b.buffer[id] = f
 	return f
