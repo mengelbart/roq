@@ -6,8 +6,8 @@ import (
 	"io"
 	"sync"
 
-	"github.com/mengelbart/qlog"
-	roqqlog "github.com/mengelbart/qlog/roq"
+	"github.com/mengelbart/roq/qlog"
+	"github.com/quic-go/quic-go/qlogwriter"
 	"github.com/quic-go/quic-go/quicvarint"
 )
 
@@ -27,6 +27,14 @@ type ReceiveStream interface {
 	io.Reader
 	ID() int64
 	CancelRead(uint64)
+}
+
+// QlogConnection is implemented by Connections that can provide the qlog trace
+// of the underlying QUIC connection. A Session whose Connection implements it
+// logs its RoQ events into that trace, provided the trace was created with the
+// RoQ event schema. QUICGoConnection implements it.
+type QlogConnection interface {
+	QlogTrace() qlogwriter.Trace
 }
 
 type Connection interface {
@@ -56,12 +64,13 @@ type Session struct {
 	ctx          context.Context
 	cancelCtx    context.CancelFunc
 
-	qlog *qlog.Logger
+	qlog          *qlogger
+	closeQlogOnce sync.Once
 }
 
 // NewSession creates a new roq session. QUIC connection is handled by roq.
 // It returns an error if conn is nil or if an option is invalid.
-func NewSession(conn Connection, acceptDatagrams bool, qlogger *qlog.Logger, opts ...Option) (*Session, error) {
+func NewSession(conn Connection, acceptDatagrams bool, opts ...Option) (*Session, error) {
 	if conn == nil {
 		return nil, errNilConnection
 	}
@@ -69,7 +78,7 @@ func NewSession(conn Connection, acceptDatagrams bool, qlogger *qlog.Logger, opt
 	if err != nil {
 		return nil, err
 	}
-	s := newSession(conn, acceptDatagrams, qlogger, config)
+	s := newSession(conn, acceptDatagrams, config)
 	s.start()
 
 	return s, nil
@@ -79,7 +88,7 @@ func NewSession(conn Connection, acceptDatagrams bool, qlogger *qlog.Logger, opt
 // handled by the application. HandleDatagram and HandleUniStreamWithFlowID have
 // to be called for each datagram / new stream. It returns an error if conn is
 // nil or if an option is invalid.
-func NewSessionWithAppHandledConn(conn Connection, acceptDatagrams bool, qlogger *qlog.Logger, opts ...Option) (*Session, error) {
+func NewSessionWithAppHandledConn(conn Connection, acceptDatagrams bool, opts ...Option) (*Session, error) {
 	if conn == nil {
 		return nil, errNilConnection
 	}
@@ -87,12 +96,12 @@ func NewSessionWithAppHandledConn(conn Connection, acceptDatagrams bool, qlogger
 	if err != nil {
 		return nil, err
 	}
-	s := newSession(conn, acceptDatagrams, qlogger, config)
+	s := newSession(conn, acceptDatagrams, config)
 
 	return s, nil
 }
 
-func newSession(conn Connection, acceptDatagrams bool, qlogger *qlog.Logger, config *sessionConfig) *Session {
+func newSession(conn Connection, acceptDatagrams bool, config *sessionConfig) *Session {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &Session{
 		receiveBufferSize: config.receiveBufferSize,
@@ -107,7 +116,29 @@ func newSession(conn Connection, acceptDatagrams bool, qlogger *qlog.Logger, con
 		wg:                sync.WaitGroup{},
 		ctx:               ctx,
 		cancelCtx:         cancel,
-		qlog:              qlogger,
+		qlog:              newQlogger(conn, config),
+	}
+}
+
+// newQlogger returns the qlogger the session logs its RoQ events to, or nil if
+// RoQ events are not being logged. A trace set on the config takes precedence
+// over the trace of the connection, if any.
+func newQlogger(conn Connection, config *sessionConfig) *qlogger {
+	trace := config.qlogTrace
+	if trace == nil {
+		qc, ok := conn.(QlogConnection)
+		if !ok {
+			return nil
+		}
+		trace = qc.QlogTrace()
+	}
+	if trace == nil || !trace.SupportsSchemas(qlog.EventSchema) {
+		return nil
+	}
+	return &qlogger{
+		recorder:  trace.AddProducer(),
+		logData:   config.qlogPacketData,
+		dataLimit: config.qlogPacketDataLimit,
 	}
 }
 
@@ -199,9 +230,18 @@ func (s *Session) closeWithError(code uint64, reason string) {
 // Close returns the error from closing the underlying QUIC connection. It is
 // idempotent: later calls close nothing and report the same error as the call
 // that closed the session.
+//
+// Close also releases the session's qlog producer, which is what finishes the
+// qlog trace of the QUIC connection, so it has to be called for the trace to be
+// written completely.
 func (s *Session) Close() error {
 	s.close(ErrRoQNoError, "")
 	s.wg.Wait()
+	// Only now that nothing can record another event is it safe to close the
+	// producer: Recorder.Close must not run concurrently with RecordEvent.
+	if s.qlog != nil {
+		s.closeQlogOnce.Do(func() { _ = s.qlog.close() })
+	}
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
 	return s.connCloseErr
@@ -250,17 +290,14 @@ func (s *Session) HandleDatagram(datagram []byte) {
 		return
 	}
 	if s.qlog != nil {
-		raw := make([]byte, len(datagram))
-		m := copy(raw, datagram)
-		s.qlog.Log(roqqlog.DatagramPacketEvent{
-			Type: roqqlog.DatagramPacketEventTypeParsed,
-			Packet: roqqlog.Packet{
+		s.qlog.record(qlog.DatagramPacketParsed{
+			Packet: qlog.Packet{
 				FlowID: flowID,
-				Length: uint64(n),
-				Raw: &qlog.RawInfo{
-					Length:        uint64(m),
-					PayloadLength: uint64(m),
-					Data:          raw,
+				Length: uint64(len(datagram)),
+				Raw: qlog.RawInfo{
+					Length:        uint64(len(datagram)),
+					PayloadLength: uint64(len(datagram) - n),
+					Data:          s.qlog.rawData(datagram),
 				},
 			},
 		})
@@ -278,7 +315,7 @@ func (s *Session) HandleDatagram(datagram []byte) {
 // ID.
 func (s *Session) HandleUniStreamWithFlowID(flowID uint64, rs ReceiveStream) {
 	if s.qlog != nil {
-		s.qlog.Log(roqqlog.StreamOpenedEvent{
+		s.qlog.record(qlog.StreamOpened{
 			FlowID:   flowID,
 			StreamID: uint64(rs.ID()),
 		})

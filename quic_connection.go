@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/quic-go/quic-go"
+	"github.com/quic-go/quic-go/qlogwriter"
 )
 
 type QUICGoReceiveStream struct {
@@ -54,6 +55,8 @@ func (s *QUICGoSendStream) CancelWrite(c uint64) {
 	s.stream.CancelWrite(quic.StreamErrorCode(c))
 }
 
+var _ QlogConnection = &QUICGoConnection{}
+
 type QUICGoConnection struct {
 	conn *quic.Conn
 }
@@ -90,6 +93,12 @@ func (c *QUICGoConnection) AcceptUniStream(ctx context.Context) (ReceiveStream, 
 	return &QUICGoReceiveStream{
 		stream: s,
 	}, nil
+}
+
+// QlogTrace returns the qlog trace of the QUIC connection. It is nil if qlog is
+// not enabled.
+func (c *QUICGoConnection) QlogTrace() qlogwriter.Trace {
+	return c.conn.QlogTrace()
 }
 
 func (c *QUICGoConnection) CloseWithError(code uint64, reason string) error {

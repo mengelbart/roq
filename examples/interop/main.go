@@ -16,16 +16,13 @@ import (
 	"math/big"
 	"os"
 	"os/exec"
-	"strings"
 	"time"
 
-	mqlog "github.com/mengelbart/qlog"
-	roqqlog "github.com/mengelbart/qlog/roq"
 	"github.com/mengelbart/roq"
+	"github.com/mengelbart/roq/qlog"
 	"github.com/pion/rtp"
 	"github.com/pion/rtp/codecs"
 	"github.com/quic-go/quic-go"
-	"github.com/quic-go/quic-go/qlog"
 )
 
 type flags struct {
@@ -136,19 +133,7 @@ func connect(ctx context.Context, f flags, keyLog io.Writer) (*quic.Conn, error)
 }
 
 func runSender(f flags, conn *quic.Conn) error {
-	role := "server"
-	if !f.Server {
-		role = "client"
-	}
-	qlogfile := getQLOGWriter("roq", role)
-	if qlogfile != nil {
-		defer qlogfile.Close() //nolint
-	}
-	var qlogger *mqlog.Logger
-	if qlogfile != nil {
-		qlogger = mqlog.NewQLOGHandler(qlogfile, "roq qlog", "RoQ Interop tester QLOG Events", role, roqqlog.Schema)
-	}
-	s, err := newSender(roq.NewQUICGoConnection(conn), qlogger)
+	s, err := newSender(roq.NewQUICGoConnection(conn))
 	if err != nil {
 		return err
 	}
@@ -185,22 +170,12 @@ func runSender(f flags, conn *quic.Conn) error {
 }
 
 func runReceiver(f flags, conn *quic.Conn) error {
-	role := "client"
-	if f.Server {
-		role = "server"
-	}
-	qlogfile := getQLOGWriter("roq", role)
-	if qlogfile != nil {
-		defer qlogfile.Close() //nolint
-	}
-	var qlogger *mqlog.Logger
-	if qlogfile != nil {
-		qlogger = mqlog.NewQLOGHandler(qlogfile, "roq-qlog", "RoQ Interop tester QLOG Events", role, roqqlog.Schema)
-	}
-	r, err := newReceiver(roq.NewQUICGoConnection(conn), qlogger)
+	r, err := newReceiver(roq.NewQUICGoConnection(conn))
 	if err != nil {
 		return err
 	}
+	// Closing the session finishes the qlog trace of the connection.
+	defer r.Close() //nolint
 	var writer io.WriteCloser
 	if len(f.Destination) > 0 {
 		fileWriter, err := newFileWriter(f.Destination, f.Codec)
@@ -289,25 +264,6 @@ func generateTLSConfigWithNewCert(keyLog io.Writer) (*tls.Config, error) {
 		NextProtos:   []string{"roq-09"},
 		KeyLogWriter: keyLog,
 	}, nil
-}
-
-func getQLOGWriter(id, vantagePoint string) io.WriteCloser {
-	qlogDir := os.Getenv("QLOGDIR")
-	if qlogDir == "" {
-		return nil
-	}
-	if _, err := os.Stat(qlogDir); os.IsNotExist(err) {
-		if err := os.MkdirAll(qlogDir, 0o755); err != nil {
-			log.Fatalf("failed to create qlog dir %s: %v", qlogDir, err)
-		}
-	}
-	path := fmt.Sprintf("%s/%s_%s.qlog", strings.TrimRight(qlogDir, "/"), id, vantagePoint)
-	f, err := os.Create(path)
-	if err != nil {
-		log.Printf("Failed to create qlog file %s: %s", path, err.Error())
-		return nil
-	}
-	return f
 }
 
 type bufferedWriteCloser struct {

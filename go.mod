@@ -3,7 +3,6 @@ module github.com/mengelbart/roq
 go 1.25.0
 
 require (
-	github.com/mengelbart/qlog v0.1.0
 	github.com/pion/interceptor v0.1.47
 	github.com/pion/rtp v1.10.5
 	github.com/pion/webrtc/v3 v3.3.6

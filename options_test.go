@@ -11,7 +11,7 @@ import (
 // Without options a session uses the documented defaults.
 func TestSessionDefaultKnobs(t *testing.T) {
 	c := newStubConn()
-	s, err := NewSession(c, true, nil)
+	s, err := NewSession(c, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -33,7 +33,7 @@ func TestSessionDefaultKnobs(t *testing.T) {
 // flows the session creates for unknown flow IDs.
 func TestWithReceiveBufferSize(t *testing.T) {
 	c := newStubConn()
-	s, err := NewSession(c, true, nil, WithReceiveBufferSize(4))
+	s, err := NewSession(c, true, WithReceiveBufferSize(4))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -59,7 +59,7 @@ func TestWithReceiveBufferSize(t *testing.T) {
 // WithUnknownFlowBufferSize must bound how many unclaimed flows are buffered.
 func TestWithUnknownFlowBufferSize(t *testing.T) {
 	c := newStubConn()
-	s, err := NewSessionWithAppHandledConn(c, true, nil, WithUnknownFlowBufferSize(2))
+	s, err := NewSessionWithAppHandledConn(c, true, WithUnknownFlowBufferSize(2))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -93,12 +93,14 @@ func TestInvalidOptions(t *testing.T) {
 		{"negative receive buffer", WithReceiveBufferSize(-1)},
 		{"zero unknown flow buffer", WithUnknownFlowBufferSize(0)},
 		{"negative unknown flow buffer", WithUnknownFlowBufferSize(-1)},
+		{"negative qlog packet data limit", WithQlogPacketData(-1)},
+		{"nil option", nil},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			if _, err := NewSession(newStubConn(), true, nil, tc.opt); !errors.Is(err, errInvalidOption) {
+			if _, err := NewSession(newStubConn(), true, tc.opt); !errors.Is(err, errInvalidOption) {
 				t.Errorf("NewSession error = %v, want errInvalidOption", err)
 			}
-			if _, err := NewSessionWithAppHandledConn(newStubConn(), true, nil, tc.opt); !errors.Is(err, errInvalidOption) {
+			if _, err := NewSessionWithAppHandledConn(newStubConn(), true, tc.opt); !errors.Is(err, errInvalidOption) {
 				t.Errorf("NewSessionWithAppHandledConn error = %v, want errInvalidOption", err)
 			}
 		})

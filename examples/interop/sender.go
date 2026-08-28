@@ -4,7 +4,6 @@ import (
 	"context"
 	"io"
 
-	"github.com/mengelbart/qlog"
 	"github.com/mengelbart/roq"
 	"github.com/pion/rtp"
 )
@@ -25,8 +24,8 @@ type sender struct {
 	session *roq.Session
 }
 
-func newSender(conn roq.Connection, qlog *qlog.Logger) (*sender, error) {
-	session, err := roq.NewSession(conn, true, qlog)
+func newSender(conn roq.Connection) (*sender, error) {
+	session, err := roq.NewSession(conn, true)
 	if err != nil {
 		return nil, err
 	}

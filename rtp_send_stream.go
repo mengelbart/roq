@@ -4,8 +4,7 @@ import (
 	"io"
 	"sync"
 
-	"github.com/mengelbart/qlog"
-	roqqlog "github.com/mengelbart/qlog/roq"
+	"github.com/mengelbart/roq/qlog"
 	"github.com/quic-go/quic-go/quicvarint"
 )
 
@@ -13,7 +12,7 @@ type RTPSendStream struct {
 	stream      SendStream
 	flowID      uint64
 	flowIDBytes []byte
-	qlog        *qlog.Logger
+	qlog        *qlogger
 
 	// lock guards the fields below, which are mutated by every write.
 	lock       sync.Mutex
@@ -24,7 +23,7 @@ type RTPSendStream struct {
 	pending []byte
 }
 
-func newRTPSendStream(stream SendStream, flowID uint64, flowIDBytes []byte, qlog *qlog.Logger) (*RTPSendStream, error) {
+func newRTPSendStream(stream SendStream, flowID uint64, flowIDBytes []byte, qlog *qlogger) (*RTPSendStream, error) {
 	return &RTPSendStream{
 		stream:      stream,
 		flowID:      flowID,
@@ -56,9 +55,13 @@ func (s *RTPSendStream) WriteRTPBytes(packet []byte) (int, error) {
 	}
 
 	s.buffer = s.buffer[0:0]
+	// frameStart is where the packet's own frame begins: the flow ID ahead of
+	// it goes on the stream once, not once per packet.
+	frameStart := 0
 	if !s.sentFlowID {
 		s.buffer = append(s.buffer, s.flowIDBytes...)
 		s.sentFlowID = true
+		frameStart = len(s.buffer)
 	}
 	s.buffer = quicvarint.Append(s.buffer, uint64(len(packet)))
 	headerLen := len(s.buffer)
@@ -73,18 +76,17 @@ func (s *RTPSendStream) WriteRTPBytes(packet []byte) (int, error) {
 		}
 	}
 	if s.qlog != nil {
-		raw := make([]byte, len(s.buffer))
-		m := copy(raw, s.buffer)
-		s.qlog.Log(roqqlog.StreamPacketEvent{
-			EventName: roqqlog.StreamPacketEventTypeCreated,
-			StreamID:  s.stream.ID(),
-			Packet: roqqlog.Packet{
+		length := uint64(len(packet))
+		framed := uint64(len(s.buffer) - frameStart)
+		s.qlog.record(qlog.StreamPacketCreated{
+			StreamID: uint64(s.stream.ID()),
+			Packet: qlog.Packet{
 				FlowID: s.flowID,
-				Length: uint64(len(s.buffer)),
-				Raw: &qlog.RawInfo{
-					Length:        uint64(m),
-					PayloadLength: uint64(m),
-					Data:          raw,
+				Length: framed,
+				Raw: qlog.RawInfo{
+					Length:        framed,
+					PayloadLength: length,
+					Data:          s.qlog.rawData(s.buffer[frameStart:]),
 				},
 			},
 		})

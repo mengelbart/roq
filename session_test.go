@@ -208,7 +208,7 @@ func closeWithin(t *testing.T, s *Session, timeout time.Duration) {
 // a protocol violation by the sender and closes the session.
 func TestCloseAfterMalformedDatagram(t *testing.T) {
 	c := newStubConn()
-	s, err := NewSession(c, true, nil)
+	s, err := NewSession(c, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -230,7 +230,7 @@ func TestCloseAfterMalformedDatagram(t *testing.T) {
 // peer cancelling one frame must not tear down the session.
 func TestMalformedStreamHeaderIsDropped(t *testing.T) {
 	c := newStubConn()
-	s, err := NewSession(c, true, nil)
+	s, err := NewSession(c, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -253,7 +253,7 @@ func TestMalformedStreamHeaderIsDropped(t *testing.T) {
 // Close must tear down open send flows without deadlocking on the flow map.
 func TestCloseWithOpenSendFlow(t *testing.T) {
 	c := newStubConn()
-	s, err := NewSession(c, true, nil)
+	s, err := NewSession(c, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -275,7 +275,7 @@ func TestCloseWithOpenSendFlow(t *testing.T) {
 // Close must tear down open receive flows and their streams.
 func TestCloseWithOpenReceiveFlow(t *testing.T) {
 	c := newStubConn()
-	s, err := NewSession(c, true, nil)
+	s, err := NewSession(c, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -310,7 +310,7 @@ func TestCloseWithOpenReceiveFlow(t *testing.T) {
 // close is idempotent: the first code wins and the connection is closed once.
 func TestCloseIsIdempotent(t *testing.T) {
 	c := newStubConn()
-	s, err := NewSession(c, true, nil)
+	s, err := NewSession(c, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -333,7 +333,7 @@ func TestCloseIsIdempotent(t *testing.T) {
 // Concurrent Close calls must all return.
 func TestConcurrentClose(t *testing.T) {
 	c := newStubConn()
-	s, err := NewSession(c, true, nil)
+	s, err := NewSession(c, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -357,7 +357,7 @@ func TestConcurrentClose(t *testing.T) {
 // Operations after close must fail rather than block.
 func TestNewFlowAfterClose(t *testing.T) {
 	c := newStubConn()
-	s, err := NewSession(c, true, nil)
+	s, err := NewSession(c, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -375,7 +375,7 @@ func TestNewFlowAfterClose(t *testing.T) {
 // with, not just its message.
 func TestSessionErrorAccessors(t *testing.T) {
 	c := newStubConn()
-	s, err := NewSession(c, true, nil)
+	s, err := NewSession(c, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -401,7 +401,7 @@ func TestSessionErrorAccessors(t *testing.T) {
 func TestCloseReturnsConnectionError(t *testing.T) {
 	c := newStubConn()
 	c.closeErr = errors.New("connection close failed")
-	s, err := NewSession(c, true, nil)
+	s, err := NewSession(c, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -416,10 +416,10 @@ func TestCloseReturnsConnectionError(t *testing.T) {
 // The constructors' error return must mean something: a nil connection is
 // rejected instead of panicking in a receive loop later on.
 func TestNewSessionNilConnection(t *testing.T) {
-	if _, err := NewSession(nil, true, nil); !errors.Is(err, errNilConnection) {
+	if _, err := NewSession(nil, true); !errors.Is(err, errNilConnection) {
 		t.Errorf("NewSession(nil) error = %v, want errNilConnection", err)
 	}
-	if _, err := NewSessionWithAppHandledConn(nil, true, nil); !errors.Is(err, errNilConnection) {
+	if _, err := NewSessionWithAppHandledConn(nil, true); !errors.Is(err, errNilConnection) {
 		t.Errorf("NewSessionWithAppHandledConn(nil) error = %v, want errNilConnection", err)
 	}
 }
@@ -428,7 +428,7 @@ func TestNewSessionNilConnection(t *testing.T) {
 // buffered flow off with it: the winner has to be the flow that already holds
 // the packets that arrived for the ID before it was registered.
 func TestNewReceiveFlowDoesNotStrandBufferedFlow(t *testing.T) {
-	s, err := NewSessionWithAppHandledConn(newStubConn(), true, nil)
+	s, err := NewSessionWithAppHandledConn(newStubConn(), true)
 	if err != nil {
 		t.Fatal(err)
 	}

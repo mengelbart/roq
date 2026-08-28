@@ -13,7 +13,7 @@ func TestSendFlowCloseContinuesAfterStreamError(t *testing.T) {
 	closeErr := errors.New("stream close failed")
 	c := newStubConn()
 	c.sendCloseErr = closeErr
-	s, err := NewSession(c, true, nil)
+	s, err := NewSession(c, true)
 	if err != nil {
 		t.Fatal(err)
 	}
