@@ -7,3 +7,5 @@
 .idea/
 examples/playfromdisk/playfromdisk
 examples/savetodisk/savetodisk
+cover.out
+cover.lib.out
