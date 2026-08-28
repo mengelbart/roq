@@ -126,3 +126,35 @@ func TestReadExactBuffer(t *testing.T) {
 		t.Errorf("Read returned %v, want %v", buf[:n], packet)
 	}
 }
+
+// Pooled buffers must be allocated with capacity, not content: a buffer holding
+// 65535 bytes only works because every Get is followed by a Reset.
+func TestBufferPoolAllocatesEmptyBuffers(t *testing.T) {
+	f := newReceiveFlow(1, 10, nil)
+
+	b := f.bufferPool.Get().(*bytes.Buffer)
+	if b.Len() != 0 {
+		t.Errorf("pooled buffer holds %d bytes of content, want 0", b.Len())
+	}
+	if b.Cap() < maxPacketBufferSize {
+		t.Errorf("pooled buffer has capacity %d, want at least %d", b.Cap(), maxPacketBufferSize)
+	}
+}
+
+// A packet dropped because the queue is full must go back to the pool,
+// otherwise overload defeats the pool entirely.
+func TestPushReturnsDroppedBufferToPool(t *testing.T) {
+	f := newReceiveFlow(1, 1, nil)
+
+	f.push(bytes.NewBufferString("queued"))
+
+	dropped := bytes.NewBufferString("dropped")
+	f.push(dropped)
+
+	if len(f.buffer) != 1 {
+		t.Fatalf("flow buffered %d packets, want 1", len(f.buffer))
+	}
+	if got := f.bufferPool.Get().(*bytes.Buffer); got != dropped {
+		t.Error("dropped packet's buffer was not returned to the pool")
+	}
+}

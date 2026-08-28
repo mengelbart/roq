@@ -14,6 +14,11 @@ import (
 	"github.com/quic-go/quic-go/quicvarint"
 )
 
+// maxPacketBufferSize is the capacity pooled packet buffers are allocated
+// with. It is the largest possible UDP payload, so a packet never needs the
+// buffer to grow.
+const maxPacketBufferSize = 65535
+
 type ReceiveFlow struct {
 	id         uint64
 	buffer     chan *bytes.Buffer
@@ -32,7 +37,7 @@ func newReceiveFlow(id uint64, receiveBufferSize int, qlog *qlog.Logger) *Receiv
 		buffer: make(chan *bytes.Buffer, receiveBufferSize),
 		bufferPool: sync.Pool{
 			New: func() any {
-				return bytes.NewBuffer(make([]byte, 65535))
+				return bytes.NewBuffer(make([]byte, 0, maxPacketBufferSize))
 			},
 		},
 		ctx:       ctx,
@@ -43,11 +48,14 @@ func newReceiveFlow(id uint64, receiveBufferSize int, qlog *qlog.Logger) *Receiv
 	}
 }
 
+// push queues packet for reading. If the queue is full, the packet is dropped
+// and its buffer handed back to the pool, so that overload does not defeat the
+// pool by leaking every dropped buffer to the garbage collector.
 func (f *ReceiveFlow) push(packet *bytes.Buffer) {
 	select {
 	case f.buffer <- packet:
-	case <-f.ctx.Done():
 	default:
+		f.bufferPool.Put(packet)
 	}
 }
 
