@@ -19,6 +19,7 @@ const (
 var (
 	errClosed        = errors.New("session closed")
 	errNilConnection = errors.New("nil connection")
+	errInvalidOption = errors.New("invalid option")
 )
 
 // SessionError is the error returned by operations on a closed session. It

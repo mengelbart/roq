@@ -14,9 +14,9 @@ type receiveFlowBuffer struct {
 	queue  []uint64
 }
 
-func newReceiveFlowBuffer(maxLen uint) *receiveFlowBuffer {
+func newReceiveFlowBuffer(maxLen int) *receiveFlowBuffer {
 	b := &receiveFlowBuffer{
-		maxLen: int(maxLen),
+		maxLen: maxLen,
 		mutex:  sync.Mutex{},
 		buffer: map[uint64]*ReceiveFlow{},
 		queue:  []uint64{},
