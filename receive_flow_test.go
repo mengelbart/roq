@@ -2,8 +2,10 @@ package roq
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"io"
+	"sync"
 	"testing"
 	"time"
 
@@ -145,16 +147,165 @@ func TestBufferPoolAllocatesEmptyBuffers(t *testing.T) {
 // otherwise overload defeats the pool entirely.
 func TestPushReturnsDroppedBufferToPool(t *testing.T) {
 	f := newReceiveFlow(1, 1, nil)
+	allocated := countPoolAllocations(f)
 
-	f.push(bytes.NewBufferString("queued"))
-
-	dropped := bytes.NewBufferString("dropped")
-	f.push(dropped)
+	f.push(f.bufferPool.Get().(*bytes.Buffer))
+	for range overload {
+		f.push(f.bufferPool.Get().(*bytes.Buffer))
+	}
 
 	if len(f.buffer) != 1 {
 		t.Fatalf("flow buffered %d packets, want 1", len(f.buffer))
 	}
-	if got := f.bufferPool.Get().(*bytes.Buffer); got != dropped {
-		t.Error("dropped packet's buffer was not returned to the pool")
+	if *allocated > maxPoolAllocations {
+		t.Errorf("pool allocated %d buffers for %d dropped packets, want them recycled", *allocated, overload)
+	}
+}
+
+// overload is the number of packets a pool test pushes into a flow that cannot
+// queue them, and maxPoolAllocations the number of buffers the pool may
+// allocate while serving them. Recycling lets a single buffer serve every push,
+// so a count anywhere near overload means dropped buffers leak to the garbage
+// collector instead. The bound is only half of overload because sync.Pool
+// deliberately drops a quarter of all Puts under the race detector, to catch
+// code that assumes a pooled value comes back.
+const (
+	overload           = 1000
+	maxPoolAllocations = overload / 2
+)
+
+// countPoolAllocations instruments the flow's buffer pool and returns a counter
+// of the buffers it had to allocate because none were pooled. It must be called
+// before the flow is used.
+func countPoolAllocations(f *ReceiveFlow) *int {
+	var allocated int
+	f.bufferPool.New = func() any {
+		allocated++
+		return bytes.NewBuffer(make([]byte, 0, maxPacketBufferSize))
+	}
+	return &allocated
+}
+
+// Read must hand out the packets that were already buffered when the flow was
+// closed, instead of racing them against the cancelled context.
+func TestReadDrainsBufferAfterClose(t *testing.T) {
+	const packets = 20
+	f := newReceiveFlow(1, packets, nil)
+	for i := range packets {
+		f.push(bytes.NewBuffer([]byte{byte(i)}))
+	}
+	if err := f.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	buf := make([]byte, 1)
+	for i := range packets {
+		n, err := f.Read(buf)
+		if err != nil {
+			t.Fatalf("Read %d after close: %v, want the buffered packet", i, err)
+		}
+		if n != 1 || buf[0] != byte(i) {
+			t.Fatalf("Read %d returned %d bytes %v, want 1 byte %v", i, n, buf[:n], i)
+		}
+	}
+	if _, err := f.Read(buf); !errors.Is(err, context.Canceled) {
+		t.Errorf("Read on drained closed flow: %v, want %v", err, context.Canceled)
+	}
+}
+
+// Once Close returned, the buffer contents are final: a push that lost the
+// race must be dropped rather than queued behind the close where no Read would
+// ever return it.
+func TestPushAfterCloseIsDropped(t *testing.T) {
+	f := newReceiveFlow(1, 10, nil)
+	f.push(bytes.NewBuffer([]byte{0x01}))
+	if err := f.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	// A closed flow still recycles what it drops, so that a producer which
+	// keeps pushing until it notices the closure does not leak every buffer.
+	allocated := countPoolAllocations(f)
+	for range overload {
+		f.push(f.bufferPool.Get().(*bytes.Buffer))
+	}
+	if *allocated > maxPoolAllocations {
+		t.Errorf("pool allocated %d buffers for %d packets pushed after close, want them recycled", *allocated, overload)
+	}
+
+	buf := make([]byte, 1)
+	n, err := f.Read(buf)
+	if err != nil || n != 1 || buf[0] != 0x01 {
+		t.Fatalf("Read = %d, %v, buf %v, want the packet buffered before Close", n, err, buf[:n])
+	}
+	if _, err := f.Read(buf); !errors.Is(err, context.Canceled) {
+		t.Fatalf("Read after close: %v, want %v", err, context.Canceled)
+	}
+}
+
+// Read keeps reporting the error once a closed flow ran dry, instead of
+// blocking or panicking on the closed buffer.
+func TestReadAfterCloseIsRepeatable(t *testing.T) {
+	f := newReceiveFlow(1, 10, nil)
+	if err := f.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	buf := make([]byte, 1)
+	for i := range 3 {
+		if _, err := f.Read(buf); !errors.Is(err, context.Canceled) {
+			t.Fatalf("Read %d: %v, want %v", i, err, context.Canceled)
+		}
+	}
+}
+
+// Sessions close their flows on shutdown, so a flow the application also closes
+// itself is closed twice. That must not panic on the buffer.
+func TestCloseFlowTwice(t *testing.T) {
+	f := newReceiveFlow(1, 10, nil)
+	if err := f.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatalf("second Close: %v", err)
+	}
+}
+
+// Closing a flow while its producers are still pushing must not lose a packet
+// that was queued, and must not send on the closed buffer.
+func TestConcurrentPushAndClose(t *testing.T) {
+	for range 100 {
+		f := newReceiveFlow(1, 10, nil)
+		var wg sync.WaitGroup
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			f.push(bytes.NewBuffer([]byte{0x01}))
+		}()
+		go func() {
+			defer wg.Done()
+			_ = f.Close()
+		}()
+		wg.Wait()
+
+		// The push either won the race, in which case Read must hand the
+		// packet out, or it lost it and Read reports the closure. Both are
+		// correct; a queued packet that Read never returns is not.
+		buf := make([]byte, 1)
+		n, err := f.Read(buf)
+		if err == nil {
+			if n != 1 || buf[0] != 0x01 {
+				t.Fatalf("Read = %d bytes %v, want the pushed packet", n, buf[:n])
+			}
+			if _, err := f.Read(buf); !errors.Is(err, context.Canceled) {
+				t.Fatalf("Read on drained flow: %v, want %v", err, context.Canceled)
+			}
+			continue
+		}
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("Read: %v, want %v", err, context.Canceled)
+		}
+		if len(f.buffer) != 0 {
+			t.Fatalf("closed flow still holds %d packets no Read can return", len(f.buffer))
+		}
 	}
 }
