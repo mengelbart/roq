@@ -7,7 +7,7 @@ import (
 
 func TestReceiveFlowBufferPopRemovesFlow(t *testing.T) {
 	b := newReceiveFlowBuffer(16)
-	f := b.getOrCreate(1, 1, nil)
+	f := b.getOrCreate(1, 1, nil, nil)
 
 	if got := b.pop(1); got != f {
 		t.Fatalf("pop returned %v, want %v", got, f)
@@ -21,7 +21,7 @@ func TestReceiveFlowBufferPopRemovesFlow(t *testing.T) {
 	if got := b.pop(1); got != nil {
 		t.Errorf("second pop returned %v, want nil", got)
 	}
-	if got := b.getOrCreate(1, 1, nil); got == f {
+	if got := b.getOrCreate(1, 1, nil, nil); got == f {
 		t.Error("getOrCreate returned the popped flow, want a new one")
 	}
 }
@@ -31,7 +31,7 @@ func TestReceiveFlowBufferPopRemovesFlow(t *testing.T) {
 func TestReceiveFlowBufferPoppedFlowIsNotEvicted(t *testing.T) {
 	const maxLen = 16
 	b := newReceiveFlowBuffer(maxLen)
-	f := b.getOrCreate(1, 1, nil)
+	f := b.getOrCreate(1, 1, nil, nil)
 
 	rs := &stubReceiveStream{id: 1, cancelled: make(chan struct{})}
 	f.streams[rs.ID()] = rs
@@ -40,7 +40,7 @@ func TestReceiveFlowBufferPoppedFlowIsNotEvicted(t *testing.T) {
 		t.Fatalf("pop returned %v, want %v", got, f)
 	}
 	for i := range uint64(maxLen + 1) {
-		b.getOrCreate(100+i, 1, nil)
+		b.getOrCreate(100+i, 1, nil, nil)
 	}
 
 	select {
@@ -71,7 +71,7 @@ func TestReceiveFlowBufferGetOrCreateIsAtomic(t *testing.T) {
 		go func() {
 			defer done.Done()
 			start.Wait()
-			flows[i] = b.getOrCreate(1, 1, nil)
+			flows[i] = b.getOrCreate(1, 1, nil, nil)
 		}()
 	}
 	start.Done()

@@ -2,6 +2,7 @@ package roq
 
 import (
 	"fmt"
+	"log/slog"
 
 	"github.com/quic-go/quic-go/qlogwriter"
 )
@@ -21,6 +22,7 @@ type Option func(*sessionConfig) error
 type sessionConfig struct {
 	receiveBufferSize     int
 	unknownFlowBufferSize int
+	logger                *slog.Logger
 	qlogTrace             qlogwriter.Trace
 	qlogPacketData        bool
 	qlogPacketDataLimit   int
@@ -31,6 +33,7 @@ func newSessionConfig(opts []Option) (*sessionConfig, error) {
 	c := &sessionConfig{
 		receiveBufferSize:     defaultReceiveBufferSize,
 		unknownFlowBufferSize: defaultUnknownFlowBufferSize,
+		logger:                discardLogger(),
 	}
 	for _, opt := range opts {
 		if opt == nil {
@@ -103,4 +106,24 @@ func WithQlogPacketData(maxBytes int) Option {
 		c.qlogPacketDataLimit = maxBytes
 		return nil
 	}
+}
+
+// WithLogger sets the logger the session and its flows write to.The session
+// discards all log records unless the application passes one in. Pass
+// slog.Default() to send them to the standard logger. The logger must not be
+// nil.
+func WithLogger(logger *slog.Logger) Option {
+	return func(c *sessionConfig) error {
+		if logger == nil {
+			return fmt.Errorf("%w: logger must not be nil", errInvalidOption)
+		}
+		c.logger = logger
+		return nil
+	}
+}
+
+// discardLogger returns a logger that drops every record. It is what a session
+// uses when the application did not pass WithLogger.
+func discardLogger() *slog.Logger {
+	return slog.New(slog.DiscardHandler)
 }

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"log/slog"
 	"os"
 	"strings"
 	"sync"
@@ -20,7 +21,7 @@ import (
 // readStream must unregister the stream when it returns, otherwise flows that
 // receive one stream per frame accumulate finished streams forever.
 func TestReadStreamUnregistersOnEOF(t *testing.T) {
-	f := newReceiveFlow(1, 10, nil)
+	f := newReceiveFlow(1, 10, nil, nil)
 
 	for i := range int64(4) {
 		payload := []byte{0x42}
@@ -45,7 +46,7 @@ func TestReadStreamUnregistersOnEOF(t *testing.T) {
 }
 
 func TestReadStreamUnregistersOnClose(t *testing.T) {
-	f := newReceiveFlow(1, 10, nil)
+	f := newReceiveFlow(1, 10, nil, nil)
 	rs := &stubReceiveStream{
 		id:        1,
 		cancelled: make(chan struct{}),
@@ -81,7 +82,7 @@ func TestReadStreamUnregistersOnClose(t *testing.T) {
 // Read must not silently truncate: a caller whose buffer is too small for the
 // next packet gets io.ErrShortBuffer instead of a mangled RTP packet.
 func TestReadShortBuffer(t *testing.T) {
-	f := newReceiveFlow(1, 10, nil)
+	f := newReceiveFlow(1, 10, nil, nil)
 	packet := []byte{0x80, 0x60, 0x00, 0x01, 0xde, 0xad, 0xbe, 0xef}
 	f.push(bytes.NewBuffer(packet))
 
@@ -98,7 +99,7 @@ func TestReadShortBuffer(t *testing.T) {
 // A short read must not stall the flow: the truncated packet is dropped and the
 // next packet is still readable.
 func TestReadAfterShortBuffer(t *testing.T) {
-	f := newReceiveFlow(1, 10, nil)
+	f := newReceiveFlow(1, 10, nil, nil)
 	first := []byte{0x80, 0x60, 0x00, 0x01}
 	second := []byte{0x42}
 	f.push(bytes.NewBuffer(first))
@@ -120,7 +121,7 @@ func TestReadAfterShortBuffer(t *testing.T) {
 
 // A buffer of exactly the packet size is not short.
 func TestReadExactBuffer(t *testing.T) {
-	f := newReceiveFlow(1, 10, nil)
+	f := newReceiveFlow(1, 10, nil, nil)
 	packet := []byte{0x80, 0x60, 0x00, 0x01, 0xde, 0xad, 0xbe, 0xef}
 	f.push(bytes.NewBuffer(packet))
 
@@ -137,7 +138,7 @@ func TestReadExactBuffer(t *testing.T) {
 // Pooled buffers must be allocated with capacity, not content: a buffer holding
 // 65535 bytes only works because every Get is followed by a Reset.
 func TestBufferPoolAllocatesEmptyBuffers(t *testing.T) {
-	f := newReceiveFlow(1, 10, nil)
+	f := newReceiveFlow(1, 10, nil, nil)
 
 	b := f.bufferPool.Get().(*bytes.Buffer)
 	if b.Len() != 0 {
@@ -151,7 +152,7 @@ func TestBufferPoolAllocatesEmptyBuffers(t *testing.T) {
 // A packet dropped because the queue is full must go back to the pool,
 // otherwise overload defeats the pool entirely.
 func TestPushReturnsDroppedBufferToPool(t *testing.T) {
-	f := newReceiveFlow(1, 1, nil)
+	f := newReceiveFlow(1, 1, nil, nil)
 	allocated := countPoolAllocations(f)
 
 	f.push(f.bufferPool.Get().(*bytes.Buffer))
@@ -195,7 +196,7 @@ func countPoolAllocations(f *ReceiveFlow) *int {
 // closed, instead of racing them against the cancelled context.
 func TestReadDrainsBufferAfterClose(t *testing.T) {
 	const packets = 20
-	f := newReceiveFlow(1, packets, nil)
+	f := newReceiveFlow(1, packets, nil, nil)
 	for i := range packets {
 		f.push(bytes.NewBuffer([]byte{byte(i)}))
 	}
@@ -222,7 +223,7 @@ func TestReadDrainsBufferAfterClose(t *testing.T) {
 // race must be dropped rather than queued behind the close where no Read would
 // ever return it.
 func TestPushAfterCloseIsDropped(t *testing.T) {
-	f := newReceiveFlow(1, 10, nil)
+	f := newReceiveFlow(1, 10, nil, nil)
 	f.push(bytes.NewBuffer([]byte{0x01}))
 	if err := f.Close(); err != nil {
 		t.Fatalf("Close: %v", err)
@@ -251,7 +252,7 @@ func TestPushAfterCloseIsDropped(t *testing.T) {
 // Read keeps reporting the error once a closed flow ran dry, instead of
 // blocking or panicking on the closed buffer.
 func TestReadAfterCloseIsRepeatable(t *testing.T) {
-	f := newReceiveFlow(1, 10, nil)
+	f := newReceiveFlow(1, 10, nil, nil)
 	if err := f.Close(); err != nil {
 		t.Fatalf("Close: %v", err)
 	}
@@ -266,7 +267,7 @@ func TestReadAfterCloseIsRepeatable(t *testing.T) {
 // Sessions close their flows on shutdown, so a flow the application also closes
 // itself is closed twice. That must not panic on the buffer.
 func TestCloseFlowTwice(t *testing.T) {
-	f := newReceiveFlow(1, 10, nil)
+	f := newReceiveFlow(1, 10, nil, nil)
 	if err := f.Close(); err != nil {
 		t.Fatalf("Close: %v", err)
 	}
@@ -278,7 +279,7 @@ func TestCloseFlowTwice(t *testing.T) {
 // Closing a flow while its producers are still pushing must not lose a packet
 // that was queued, and must not send on the closed buffer.
 func TestConcurrentPushAndClose(t *testing.T) {
-	f := newReceiveFlow(1, 10, nil)
+	f := newReceiveFlow(1, 10, nil, nil)
 	var wg sync.WaitGroup
 	wg.Add(2)
 	go func() {
@@ -335,10 +336,11 @@ func TestReadStreamWrappedErrors(t *testing.T) {
 	}} {
 		t.Run(tc.name, func(t *testing.T) {
 			var logs bytes.Buffer
-			log.SetOutput(&logs)
-			defer log.SetOutput(os.Stderr)
+			logger := slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{
+				Level: slog.LevelDebug,
+			}))
 
-			f := newReceiveFlow(1, 10, nil)
+			f := newReceiveFlow(1, 10, nil, logger)
 			payload := []byte{0x42}
 			data := quicvarint.Append(nil, uint64(len(payload)))
 			data = append(data, payload...)
@@ -374,9 +376,31 @@ func TestReadStreamWrappedErrors(t *testing.T) {
 	}
 }
 
+func TestReadStreamDoesNotUseGlobalLogger(t *testing.T) {
+	var logs bytes.Buffer
+	log.SetOutput(&logs)
+	defer log.SetOutput(os.Stderr)
+	defaultLogger := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{
+		Level: slog.LevelDebug,
+	})))
+	defer slog.SetDefault(defaultLogger)
+
+	f := newReceiveFlow(1, 10, nil, nil)
+	f.readStream(&stubReceiveStream{
+		id:        1,
+		readErr:   errors.New("boom"),
+		cancelled: make(chan struct{}),
+	})
+
+	if logs.Len() != 0 {
+		t.Errorf("flow wrote %q to the global logger, want nothing", logs.String())
+	}
+}
+
 // A deadline that passes while Read is blocked must unblock it.
 func TestReadDeadlineExpires(t *testing.T) {
-	f := newReceiveFlow(1, 10, nil)
+	f := newReceiveFlow(1, 10, nil, nil)
 	if err := f.SetReadDeadline(time.Now().Add(20 * time.Millisecond)); err != nil {
 		t.Fatalf("SetReadDeadline: %v", err)
 	}
@@ -401,7 +425,7 @@ func TestReadDeadlineExpires(t *testing.T) {
 
 // A deadline in the past times out immediately, even with a packet buffered.
 func TestReadDeadlineInThePast(t *testing.T) {
-	f := newReceiveFlow(1, 10, nil)
+	f := newReceiveFlow(1, 10, nil, nil)
 	f.push(bytes.NewBuffer([]byte{0x42}))
 	if err := f.SetReadDeadline(time.Now().Add(-time.Second)); err != nil {
 		t.Fatalf("SetReadDeadline: %v", err)
@@ -421,7 +445,7 @@ func TestReadDeadlineInThePast(t *testing.T) {
 
 // Setting a deadline must also apply to a Read that is already blocked.
 func TestSetReadDeadlineWhileReadBlocked(t *testing.T) {
-	f := newReceiveFlow(1, 10, nil)
+	f := newReceiveFlow(1, 10, nil, nil)
 	done := make(chan error, 1)
 	go func() {
 		_, err := f.Read(make([]byte, 100))
@@ -445,7 +469,7 @@ func TestSetReadDeadlineWhileReadBlocked(t *testing.T) {
 // Extending the deadline of a blocked reader must keep it blocked, and the
 // replaced deadline must not fire on the new one.
 func TestExtendReadDeadlineWhileReadBlocked(t *testing.T) {
-	f := newReceiveFlow(1, 10, nil)
+	f := newReceiveFlow(1, 10, nil, nil)
 	if err := f.SetReadDeadline(time.Now().Add(20 * time.Millisecond)); err != nil {
 		t.Fatalf("SetReadDeadline: %v", err)
 	}
@@ -475,7 +499,7 @@ func TestExtendReadDeadlineWhileReadBlocked(t *testing.T) {
 
 // A deadline must not keep Read from reporting the closed flow.
 func TestReadDeadlineAndClose(t *testing.T) {
-	f := newReceiveFlow(1, 10, nil)
+	f := newReceiveFlow(1, 10, nil, nil)
 	if err := f.SetReadDeadline(time.Now().Add(time.Hour)); err != nil {
 		t.Fatalf("SetReadDeadline: %v", err)
 	}
@@ -500,7 +524,7 @@ func TestReadDeadlineAndClose(t *testing.T) {
 // Racing SetReadDeadline against readers and expiring timers must not panic on
 // a double close of the deadline channel.
 func TestConcurrentSetReadDeadline(t *testing.T) {
-	f := newReceiveFlow(1, 10, nil)
+	f := newReceiveFlow(1, 10, nil, nil)
 	var wg sync.WaitGroup
 	for range 8 {
 		wg.Add(1)

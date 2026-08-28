@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"io"
+	"log/slog"
 	"sync"
 
 	"github.com/mengelbart/roq/qlog"
@@ -66,6 +67,7 @@ type Session struct {
 
 	qlog          *qlogger
 	closeQlogOnce sync.Once
+	logger        *slog.Logger
 }
 
 // NewSession creates a new roq session. QUIC connection is handled by roq.
@@ -117,6 +119,7 @@ func newSession(conn Connection, acceptDatagrams bool, config *sessionConfig) *S
 		ctx:               ctx,
 		cancelCtx:         cancel,
 		qlog:              newQlogger(conn, config),
+		logger:            config.logger,
 	}
 }
 
@@ -168,7 +171,7 @@ func (s *Session) NewSendFlow(id uint64) (*SendFlow, error) {
 	}
 	f := newFlow(s.conn, id, func() {
 		s.sendFlows.delete(id)
-	}, s.qlog)
+	}, s.qlog, s.logger)
 	if _, ok := s.sendFlows.getOrInsert(id, f); !ok {
 		return nil, errDuplicateFlowID
 	}
@@ -186,7 +189,7 @@ func (s *Session) NewReceiveFlow(id uint64) (*ReceiveFlow, error) {
 	}
 	f := s.receiveFlowBuffer.pop(id)
 	if f == nil {
-		f = newReceiveFlow(id, s.receiveBufferSize, s.qlog)
+		f = newReceiveFlow(id, s.receiveBufferSize, s.qlog, s.logger)
 	}
 	s.receiveFlows.set(id, f)
 	return f, nil
@@ -277,7 +280,7 @@ func (s *Session) receiveFlow(flowID uint64) *ReceiveFlow {
 	if f, ok := s.receiveFlows.get(flowID); ok {
 		return f
 	}
-	return s.receiveFlowBuffer.getOrCreate(flowID, s.receiveBufferSize, s.qlog)
+	return s.receiveFlowBuffer.getOrCreate(flowID, s.receiveBufferSize, s.qlog, s.logger)
 }
 
 // HandleDatagram handles a datagram. If QUIC connection is handled by the

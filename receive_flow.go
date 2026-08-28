@@ -5,7 +5,7 @@ import (
 	"context"
 	"errors"
 	"io"
-	"log"
+	"log/slog"
 	"os"
 	"sync"
 	"time"
@@ -38,10 +38,14 @@ type ReceiveFlow struct {
 	deadlineExpired bool
 	deadlineTimer   *time.Timer
 
-	qlog *qlogger
+	qlog   *qlogger
+	logger *slog.Logger
 }
 
-func newReceiveFlow(id uint64, receiveBufferSize int, qlog *qlogger) *ReceiveFlow {
+func newReceiveFlow(id uint64, receiveBufferSize int, qlog *qlogger, logger *slog.Logger) *ReceiveFlow {
+	if logger == nil {
+		logger = discardLogger()
+	}
 	ctx, cancel := context.WithCancel(context.Background())
 	return &ReceiveFlow{
 		id:     id,
@@ -58,6 +62,7 @@ func newReceiveFlow(id uint64, receiveBufferSize int, qlog *qlogger) *ReceiveFlo
 		closed:     false,
 		deadlineCh: make(chan struct{}),
 		qlog:       qlog,
+		logger:     logger,
 	}
 }
 
@@ -110,10 +115,12 @@ func (f *ReceiveFlow) readStream(rs ReceiveStream) {
 			}
 			var streamErr *quic.StreamError
 			if errors.As(err, &streamErr) {
-				log.Printf("got stream error while reading length: %v", streamErr)
+				f.logger.Debug("got stream error while reading length",
+					"flowID", f.id, "streamID", rs.ID(), "error", streamErr)
 				return
 			}
-			log.Printf("got unexpected error while reading length: %v", err)
+			f.logger.Warn("got unexpected error while reading length",
+				"flowID", f.id, "streamID", rs.ID(), "error", err)
 			return
 		}
 		r := io.LimitReader(reader, int64(length))
@@ -126,10 +133,12 @@ func (f *ReceiveFlow) readStream(rs ReceiveStream) {
 		if err != nil {
 			var streamErr *quic.StreamError
 			if errors.As(err, &streamErr) {
-				log.Printf("got stream error after reading %v bytes of payload: %v", n, streamErr)
+				f.logger.Debug("got stream error while reading payload",
+					"flowID", f.id, "streamID", rs.ID(), "read", n, "error", streamErr)
 				return
 			}
-			log.Printf("got unexpected error after reading %v bytes of payload: %v", n, err)
+			f.logger.Warn("got unexpected error while reading payload",
+				"flowID", f.id, "streamID", rs.ID(), "read", n, "error", err)
 			return
 		}
 		if f.qlog != nil {

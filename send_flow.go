@@ -19,9 +19,13 @@ type SendFlow struct {
 	onClose   func()
 	closedErr error
 	qlog      *qlogger
+	logger    *slog.Logger
 }
 
-func newFlow(conn Connection, id uint64, onClose func(), qlog *qlogger) *SendFlow {
+func newFlow(conn Connection, id uint64, onClose func(), qlog *qlogger, logger *slog.Logger) *SendFlow {
+	if logger == nil {
+		logger = discardLogger()
+	}
 	flowID := make([]byte, 0, quicvarint.Len(id))
 	flowID = quicvarint.Append(flowID, id)
 	return &SendFlow{
@@ -33,6 +37,7 @@ func newFlow(conn Connection, id uint64, onClose func(), qlog *qlogger) *SendFlo
 		onClose:   onClose,
 		closedErr: nil,
 		qlog:      qlog,
+		logger:    logger,
 	}
 }
 
@@ -72,7 +77,8 @@ func (f *SendFlow) NewSendStream(ctx context.Context, priority uint32, incremant
 	}
 	priorityStream, ok := s.(PrioritySendStream)
 	if ok {
-		slog.Info("roq setting stream priority", "priority", priority, "incremental", incremantal)
+		f.logger.Debug("setting stream priority",
+			"flowID", f.id, "streamID", s.ID(), "priority", priority, "incremental", incremantal)
 		priorityStream.SetPriority(priority)
 		priorityStream.SetIncremental(incremantal)
 	}
