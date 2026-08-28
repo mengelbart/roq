@@ -1,6 +1,7 @@
 package roq
 
 import (
+	"log/slog"
 	"slices"
 	"sync"
 )
@@ -26,7 +27,7 @@ func newReceiveFlowBuffer(maxLen int) *receiveFlowBuffer {
 // flow if the buffer holds none. Lookup and creation happen under a single
 // lock hold, so concurrent callers for the same unknown flow ID all get the
 // same flow.
-func (b *receiveFlowBuffer) getOrCreate(id uint64, receiveBufferSize int, qlog *qlogger) *ReceiveFlow {
+func (b *receiveFlowBuffer) getOrCreate(id uint64, receiveBufferSize int, qlog *qlogger, logger *slog.Logger) *ReceiveFlow {
 	b.mutex.Lock()
 	defer b.mutex.Unlock()
 	if f, ok := b.buffer[id]; ok {
@@ -41,7 +42,7 @@ func (b *receiveFlowBuffer) getOrCreate(id uint64, receiveBufferSize int, qlog *
 		delete(b.buffer, front)
 		b.queue = b.queue[1:]
 	}
-	f := newReceiveFlow(id, receiveBufferSize, qlog)
+	f := newReceiveFlow(id, receiveBufferSize, qlog, logger)
 	b.queue = append(b.queue, id)
 	b.buffer[id] = f
 	return f

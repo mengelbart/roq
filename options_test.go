@@ -1,7 +1,11 @@
 package roq
 
 import (
+	"bytes"
 	"errors"
+	"log"
+	"log/slog"
+	"os"
 	"testing"
 	"time"
 
@@ -94,6 +98,7 @@ func TestInvalidOptions(t *testing.T) {
 		{"zero unknown flow buffer", WithUnknownFlowBufferSize(0)},
 		{"negative unknown flow buffer", WithUnknownFlowBufferSize(-1)},
 		{"negative qlog packet data limit", WithQlogPacketData(-1)},
+		{"nil logger", WithLogger(nil)},
 		{"nil option", nil},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -104,6 +109,71 @@ func TestInvalidOptions(t *testing.T) {
 				t.Errorf("NewSessionWithAppHandledConn error = %v, want errInvalidOption", err)
 			}
 		})
+	}
+}
+
+func TestWithLogger(t *testing.T) {
+	var logs bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{
+		Level: slog.LevelDebug,
+	}))
+
+	c := newStubConn()
+	s, err := NewSession(c, true, WithLogger(logger))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer closeWithin(t, s, 5*time.Second)
+
+	rf, err := s.NewReceiveFlow(1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rf.logger != logger {
+		t.Error("receive flow does not use the logger passed with WithLogger")
+	}
+	sf, err := s.NewSendFlow(1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sf.logger != logger {
+		t.Error("send flow does not use the logger passed with WithLogger")
+	}
+
+	c.datagrams <- quicvarint.Append(nil, 2)
+	if bf := awaitBufferedFlow(t, s, 2); bf.logger != logger {
+		t.Error("buffered flow does not use the logger passed with WithLogger")
+	}
+}
+
+func TestSessionDoesNotUseGlobalLoggerByDefault(t *testing.T) {
+	var logs bytes.Buffer
+	log.SetOutput(&logs)
+	defer log.SetOutput(os.Stderr)
+	defaultLogger := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{
+		Level: slog.LevelDebug,
+	})))
+	defer slog.SetDefault(defaultLogger)
+
+	s, err := NewSession(newStubConn(), true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer closeWithin(t, s, 5*time.Second)
+
+	f, err := s.NewReceiveFlow(1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.readStream(&stubReceiveStream{
+		id:        1,
+		readErr:   errors.New("boom"),
+		cancelled: make(chan struct{}),
+	})
+
+	if logs.Len() != 0 {
+		t.Errorf("session wrote %q to the global logger, want nothing", logs.String())
 	}
 }
 
