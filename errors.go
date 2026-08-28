@@ -17,9 +17,10 @@ const (
 )
 
 var (
-	errClosed        = errors.New("session closed")
-	errNilConnection = errors.New("nil connection")
-	errInvalidOption = errors.New("invalid option")
+	errClosed          = errors.New("session closed")
+	errNilConnection   = errors.New("nil connection")
+	errInvalidOption   = errors.New("invalid option")
+	errDuplicateFlowID = errors.New("duplicate flow ID")
 )
 
 // SessionError is the error returned by operations on a closed session. It

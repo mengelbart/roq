@@ -7,6 +7,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/quic-go/quic-go/quicvarint"
 )
 
 // stubSendStream is a SendStream that records writes and closes. writeFn, when
@@ -420,4 +422,70 @@ func TestNewSessionNilConnection(t *testing.T) {
 	if _, err := NewSessionWithAppHandledConn(nil, true, nil); !errors.Is(err, errNilConnection) {
 		t.Errorf("NewSessionWithAppHandledConn(nil) error = %v, want errNilConnection", err)
 	}
+}
+
+// A caller that loses the race to register a flow ID must not carry the
+// buffered flow off with it: the winner has to be the flow that already holds
+// the packets that arrived for the ID before it was registered.
+func TestNewReceiveFlowDoesNotStrandBufferedFlow(t *testing.T) {
+	s, err := NewSessionWithAppHandledConn(newStubConn(), true, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A packet for a flow ID nobody has registered yet: the session buffers
+	// it, and whoever registers the ID inherits that buffer.
+	s.HandleDatagram(append(quicvarint.Append(nil, 1), 'x'))
+
+	// Race registrations of that ID against each other.
+	type registration struct {
+		flow *ReceiveFlow
+		err  error
+	}
+	const routines = 8
+	registrations := make(chan registration, routines)
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	wg.Add(routines)
+	for range routines {
+		go func() {
+			defer wg.Done()
+			<-start
+			f, err := s.NewReceiveFlow(1)
+			registrations <- registration{flow: f, err: err}
+		}()
+	}
+	close(start)
+	wg.Wait()
+	close(registrations)
+
+	// Exactly one caller may win; the rest must be told the ID is taken.
+	var winners []*ReceiveFlow
+	for r := range registrations {
+		if r.err != nil {
+			if !errors.Is(r.err, errDuplicateFlowID) {
+				t.Fatalf("losing caller: error = %v, want errDuplicateFlowID", r.err)
+			}
+			continue
+		}
+		winners = append(winners, r.flow)
+	}
+	if len(winners) != 1 {
+		t.Fatalf("%d callers registered flow ID 1, want 1", len(winners))
+	}
+
+	// The winner must be able to read the buffered packet. The deadline makes
+	// a packet that was dropped with a stranded flow a failure, not a hang.
+	flow := winners[0]
+	if err := flow.SetReadDeadline(time.Now().Add(time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	buf := make([]byte, 8)
+	n, err := flow.Read(buf)
+	if err != nil {
+		t.Fatalf("Read: %v, want the packet buffered before the flow was registered", err)
+	}
+	if string(buf[:n]) != "x" {
+		t.Fatalf("Read returned %q, want %q", buf[:n], "x")
+	}
+	closeWithin(t, s, 5*time.Second)
 }
