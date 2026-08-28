@@ -266,7 +266,8 @@ func generateTLSConfigWithCertAndKey(certFile, keyFile string, keyLog io.Writer)
 	}, nil
 }
 
-// Setup a bare-bones TLS config for the server
+// generateTLSConfigWithNewCert sets up a bare-bones TLS config for the
+// server, using a freshly generated self-signed certificate.
 func generateTLSConfigWithNewCert(keyLog io.Writer) (*tls.Config, error) {
 	key, err := rsa.GenerateKey(rand.Reader, 1024)
 	if err != nil {

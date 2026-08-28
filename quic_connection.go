@@ -6,51 +6,51 @@ import (
 	"github.com/quic-go/quic-go"
 )
 
-type QuicGoReceiveStream struct {
+type QUICGoReceiveStream struct {
 	stream *quic.ReceiveStream
 }
 
-func NewQuicGoReceiveStream(stream *quic.ReceiveStream) *QuicGoReceiveStream {
-	return &QuicGoReceiveStream{
+func NewQUICGoReceiveStream(stream *quic.ReceiveStream) *QUICGoReceiveStream {
+	return &QUICGoReceiveStream{
 		stream: stream,
 	}
 }
 
-func (s *QuicGoReceiveStream) ID() int64 {
+func (s *QUICGoReceiveStream) ID() int64 {
 	return int64(s.stream.StreamID())
 }
 
-func (s *QuicGoReceiveStream) CancelRead(c uint64) {
+func (s *QUICGoReceiveStream) CancelRead(c uint64) {
 	s.stream.CancelRead(quic.StreamErrorCode(c))
 }
 
-func (c *QuicGoReceiveStream) Read(p []byte) (n int, err error) {
-	return c.stream.Read(p)
+func (s *QUICGoReceiveStream) Read(p []byte) (n int, err error) {
+	return s.stream.Read(p)
 }
 
-type QuicGoSendStream struct {
+type QUICGoSendStream struct {
 	stream *quic.SendStream
 }
 
-func NewQuicstream(stream *quic.SendStream) *QuicGoSendStream {
-	return &QuicGoSendStream{
+func NewQUICGoSendStream(stream *quic.SendStream) *QUICGoSendStream {
+	return &QUICGoSendStream{
 		stream: stream,
 	}
 }
 
-func (s *QuicGoSendStream) ID() int64 {
+func (s *QUICGoSendStream) ID() int64 {
 	return int64(s.stream.StreamID())
 }
 
-func (s *QuicGoSendStream) Write(b []byte) (int, error) {
+func (s *QUICGoSendStream) Write(b []byte) (int, error) {
 	return s.stream.Write(b)
 }
 
-func (s *QuicGoSendStream) Close() error {
+func (s *QUICGoSendStream) Close() error {
 	return s.stream.Close()
 }
 
-func (s *QuicGoSendStream) CancelWrite(c uint64) {
+func (s *QUICGoSendStream) CancelWrite(c uint64) {
 	s.stream.CancelWrite(quic.StreamErrorCode(c))
 }
 
@@ -77,7 +77,7 @@ func (c *QUICGoConnection) OpenUniStreamSync(ctx context.Context) (SendStream, e
 	if err != nil {
 		return nil, err
 	}
-	return &QuicGoSendStream{
+	return &QUICGoSendStream{
 		stream: s,
 	}, nil
 }
@@ -87,7 +87,7 @@ func (c *QUICGoConnection) AcceptUniStream(ctx context.Context) (ReceiveStream, 
 	if err != nil {
 		return nil, err
 	}
-	return &QuicGoReceiveStream{
+	return &QUICGoReceiveStream{
 		stream: s,
 	}, nil
 }

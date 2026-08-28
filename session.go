@@ -66,9 +66,10 @@ func NewSession(conn Connection, acceptDatagrams bool, qlogger *qlog.Logger) (*S
 	return s, nil
 }
 
-// NewSessionWithAppHandeledConn creates a new roq session. QUIC connection is handled by application.
-// HandleDatagram and HandleUniStreamWithFlowID have to be  called for each datagram / new stream.
-func NewSessionWithAppHandeledConn(conn Connection, acceptDatagrams bool, qlogger *qlog.Logger) (*Session, error) {
+// NewSessionWithAppHandledConn creates a new roq session. QUIC connection is
+// handled by the application. HandleDatagram and HandleUniStreamWithFlowID have
+// to be called for each datagram / new stream.
+func NewSessionWithAppHandledConn(conn Connection, acceptDatagrams bool, qlogger *qlog.Logger) (*Session, error) {
 	s := newSession(conn, acceptDatagrams, qlogger)
 
 	return s, nil
@@ -210,9 +211,9 @@ func (s *Session) receiveDatagrams() error {
 	}
 }
 
-// HandleUniStreamWithFlowID handles a datagram.
-// If QUIC connection is handled by the application, this function has to be called by the application
-// for each datagram that belongs to belongs to the roq connnection.
+// HandleDatagram handles a datagram. If QUIC connection is handled by the
+// application, this function has to be called by the application for each
+// datagram that belongs to the roq connection.
 func (s *Session) HandleDatagram(datagram []byte) {
 	flowID, n, err := quicvarint.Parse(datagram)
 	if err != nil {
@@ -249,9 +250,10 @@ func (s *Session) HandleDatagram(datagram []byte) {
 	f.push(b)
 }
 
-// HandleUniStreamWithFlowID handles a new flow with the flowID allready parsed.
-// If QUIC connection is handled by the application, this function has to be called by the application
-// for each new QUIC stream containing a roq floqID.
+// HandleUniStreamWithFlowID handles a new stream with the flow ID already
+// parsed. If QUIC connection is handled by the application, this function has to
+// be called by the application for each new QUIC stream containing a roq flow
+// ID.
 func (s *Session) HandleUniStreamWithFlowID(flowID uint64, rs ReceiveStream) {
 	if s.qlog != nil {
 		s.qlog.Log(roqqlog.StreamOpenedEvent{

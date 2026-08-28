@@ -37,7 +37,7 @@ func newFlow(conn Connection, id uint64, onClose func(), qlog *qlog.Logger) *Sen
 	}
 }
 
-// WriteRTP sends an RTP or RTCP packet as a QUIC Datagram.
+// WriteRTPBytes sends an RTP or RTCP packet as a QUIC Datagram.
 func (f *SendFlow) WriteRTPBytes(packet []byte) error {
 	if err := f.isClosed(); err != nil {
 		return err
