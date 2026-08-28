@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"log"
+	"os"
 	"sync"
 	"time"
 
@@ -31,6 +32,13 @@ type ReceiveFlow struct {
 	streams map[int64]ReceiveStream
 	closed  bool
 
+	// deadlineCh is closed when the current read deadline expires or is
+	// replaced, which wakes blocked readers so that they pick up the new
+	// deadline. deadlineExpired records whether it was closed by expiry.
+	deadlineCh      chan struct{}
+	deadlineExpired bool
+	deadlineTimer   *time.Timer
+
 	qlog *qlog.Logger
 }
 
@@ -44,12 +52,13 @@ func newReceiveFlow(id uint64, receiveBufferSize int, qlog *qlog.Logger) *Receiv
 				return bytes.NewBuffer(make([]byte, 0, maxPacketBufferSize))
 			},
 		},
-		ctx:       ctx,
-		cancelCtx: cancel,
-		lock:      sync.Mutex{},
-		streams:   map[int64]ReceiveStream{},
-		closed:    false,
-		qlog:      qlog,
+		ctx:        ctx,
+		cancelCtx:  cancel,
+		lock:       sync.Mutex{},
+		streams:    map[int64]ReceiveStream{},
+		closed:     false,
+		deadlineCh: make(chan struct{}),
+		qlog:       qlog,
 	}
 }
 
@@ -145,12 +154,27 @@ func (f *ReceiveFlow) readStream(rs ReceiveStream) {
 // across calls: if buf is too small to hold the complete packet, the packet is
 // dropped and Read returns 0 and io.ErrShortBuffer. Callers should provide a
 // buffer large enough for the largest packet they expect to receive.
+//
+// Read blocks until a packet arrives, the flow is closed, or the deadline set
+// with SetReadDeadline passes.
 func (f *ReceiveFlow) Read(buf []byte) (int, error) {
-	packet, ok := <-f.buffer
-	if !ok {
-		return 0, f.ctx.Err()
+	for {
+		f.lock.Lock()
+		expired, deadlineCh := f.deadlineExpired, f.deadlineCh
+		f.lock.Unlock()
+		if expired {
+			return 0, os.ErrDeadlineExceeded
+		}
+		select {
+		case packet, ok := <-f.buffer:
+			if !ok {
+				return 0, f.ctx.Err()
+			}
+			return f.copyPacket(buf, packet)
+		case <-deadlineCh:
+			// The deadline expired or was replaced: re-read it and wait again.
+		}
 	}
-	return f.copyPacket(buf, packet)
 }
 
 func (f *ReceiveFlow) copyPacket(buf []byte, packet *bytes.Buffer) (int, error) {
@@ -163,9 +187,51 @@ func (f *ReceiveFlow) copyPacket(buf []byte, packet *bytes.Buffer) (int, error) 
 	return n, nil
 }
 
+// SetReadDeadline sets the deadline for future Read calls and for any Read
+// that is currently blocked. Once the deadline has passed, Read returns
+// os.ErrDeadlineExceeded without waiting for a packet, even if packets are
+// still buffered, until the deadline is extended or cleared. A zero value for
+// t clears the deadline.
 func (f *ReceiveFlow) SetReadDeadline(t time.Time) error {
-	// TODO
+	f.lock.Lock()
+	defer f.lock.Unlock()
+	if f.deadlineTimer != nil {
+		f.deadlineTimer.Stop()
+		f.deadlineTimer = nil
+	}
+	// Wake the readers waiting on the previous deadline and give them a fresh
+	// channel to wait on, so that they observe the new one.
+	if !f.deadlineExpired {
+		close(f.deadlineCh)
+	}
+	f.deadlineCh = make(chan struct{})
+	f.deadlineExpired = false
+	if t.IsZero() {
+		return nil
+	}
+	d := time.Until(t)
+	if d <= 0 {
+		f.expireDeadline(f.deadlineCh)
+		return nil
+	}
+	ch := f.deadlineCh
+	f.deadlineTimer = time.AfterFunc(d, func() {
+		f.lock.Lock()
+		defer f.lock.Unlock()
+		f.expireDeadline(ch)
+	})
 	return nil
+}
+
+// expireDeadline reports the deadline ch belongs to as expired. It does
+// nothing if that deadline has meanwhile been replaced. Must be called with
+// f.lock held.
+func (f *ReceiveFlow) expireDeadline(ch chan struct{}) {
+	if f.deadlineCh != ch || f.deadlineExpired {
+		return
+	}
+	f.deadlineExpired = true
+	close(ch)
 }
 
 func (f *ReceiveFlow) ID() uint64 {
@@ -199,5 +265,9 @@ func (f *ReceiveFlow) closeBuffer() {
 		return
 	}
 	f.closed = true
+	if f.deadlineTimer != nil {
+		f.deadlineTimer.Stop()
+		f.deadlineTimer = nil
+	}
 	close(f.buffer)
 }

@@ -49,17 +49,24 @@ type Session struct {
 	receiveFlows      *syncMap[uint64, *ReceiveFlow]
 	receiveFlowBuffer *receiveFlowBuffer
 
-	mutex     sync.Mutex
-	closedErr error
-	wg        sync.WaitGroup
-	ctx       context.Context
-	cancelCtx context.CancelFunc
+	mutex sync.Mutex
+	// closedErr is the SessionError reported by operations on the closed
+	// session; connCloseErr is what closing the QUIC connection returned.
+	closedErr    error
+	connCloseErr error
+	wg           sync.WaitGroup
+	ctx          context.Context
+	cancelCtx    context.CancelFunc
 
 	qlog *qlog.Logger
 }
 
 // NewSession creates a new roq session. QUIC connection is handled by roq.
+// It returns an error if conn is nil.
 func NewSession(conn Connection, acceptDatagrams bool, qlogger *qlog.Logger) (*Session, error) {
+	if conn == nil {
+		return nil, errNilConnection
+	}
 	s := newSession(conn, acceptDatagrams, qlogger)
 	s.start()
 
@@ -68,8 +75,12 @@ func NewSession(conn Connection, acceptDatagrams bool, qlogger *qlog.Logger) (*S
 
 // NewSessionWithAppHandledConn creates a new roq session. QUIC connection is
 // handled by the application. HandleDatagram and HandleUniStreamWithFlowID have
-// to be called for each datagram / new stream.
+// to be called for each datagram / new stream. It returns an error if conn is
+// nil.
 func NewSessionWithAppHandledConn(conn Connection, acceptDatagrams bool, qlogger *qlog.Logger) (*Session, error) {
+	if conn == nil {
+		return nil, errNilConnection
+	}
 	s := newSession(conn, acceptDatagrams, qlogger)
 
 	return s, nil
@@ -165,7 +176,7 @@ func (s *Session) close(code uint64, reason string) {
 	}
 	s.sendFlows.rangeFn(func(_ uint64, v *SendFlow) { _ = v.Close() })
 	s.receiveFlows.rangeFn(func(_ uint64, v *ReceiveFlow) { _ = v.Close() })
-	_ = s.conn.CloseWithError(code, reason)
+	s.connCloseErr = s.conn.CloseWithError(code, reason)
 	s.cancelCtx()
 }
 
@@ -181,10 +192,16 @@ func (s *Session) closeWithError(code uint64, reason string) {
 
 // Close closes the session and waits for its receive loops to return. It must
 // not be called from a callback running on one of those loops.
+//
+// Close returns the error from closing the underlying QUIC connection. It is
+// idempotent: later calls close nothing and report the same error as the call
+// that closed the session.
 func (s *Session) Close() error {
 	s.close(ErrRoQNoError, "")
 	s.wg.Wait()
-	return nil
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+	return s.connCloseErr
 }
 
 func (s *Session) receiveUniStreams() error {

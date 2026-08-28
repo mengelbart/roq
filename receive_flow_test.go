@@ -375,3 +375,153 @@ func TestReadStreamWrappedErrors(t *testing.T) {
 		})
 	}
 }
+
+// A deadline that passes while Read is blocked must unblock it.
+func TestReadDeadlineExpires(t *testing.T) {
+	f := newReceiveFlow(1, 10, nil)
+	if err := f.SetReadDeadline(time.Now().Add(20 * time.Millisecond)); err != nil {
+		t.Fatalf("SetReadDeadline: %v", err)
+	}
+	done := make(chan error, 1)
+	go func() {
+		_, err := f.Read(make([]byte, 100))
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		if !errors.Is(err, os.ErrDeadlineExceeded) {
+			t.Errorf("Read error = %v, want os.ErrDeadlineExceeded", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("Read did not return after the deadline passed")
+	}
+	// The deadline stays expired until it is extended or cleared.
+	if _, err := f.Read(make([]byte, 100)); !errors.Is(err, os.ErrDeadlineExceeded) {
+		t.Errorf("second Read error = %v, want os.ErrDeadlineExceeded", err)
+	}
+}
+
+// A deadline in the past times out immediately, even with a packet buffered.
+func TestReadDeadlineInThePast(t *testing.T) {
+	f := newReceiveFlow(1, 10, nil)
+	f.push(bytes.NewBuffer([]byte{0x42}))
+	if err := f.SetReadDeadline(time.Now().Add(-time.Second)); err != nil {
+		t.Fatalf("SetReadDeadline: %v", err)
+	}
+	if _, err := f.Read(make([]byte, 100)); !errors.Is(err, os.ErrDeadlineExceeded) {
+		t.Errorf("Read error = %v, want os.ErrDeadlineExceeded", err)
+	}
+	// Clearing the deadline makes the buffered packet readable again.
+	if err := f.SetReadDeadline(time.Time{}); err != nil {
+		t.Fatalf("SetReadDeadline: %v", err)
+	}
+	n, err := f.Read(make([]byte, 100))
+	if err != nil || n != 1 {
+		t.Errorf("Read = %v, %v, want 1, nil", n, err)
+	}
+}
+
+// Setting a deadline must also apply to a Read that is already blocked.
+func TestSetReadDeadlineWhileReadBlocked(t *testing.T) {
+	f := newReceiveFlow(1, 10, nil)
+	done := make(chan error, 1)
+	go func() {
+		_, err := f.Read(make([]byte, 100))
+		done <- err
+	}()
+	// Give the reader a chance to block on the empty buffer first.
+	time.Sleep(10 * time.Millisecond)
+	if err := f.SetReadDeadline(time.Now().Add(20 * time.Millisecond)); err != nil {
+		t.Fatalf("SetReadDeadline: %v", err)
+	}
+	select {
+	case err := <-done:
+		if !errors.Is(err, os.ErrDeadlineExceeded) {
+			t.Errorf("Read error = %v, want os.ErrDeadlineExceeded", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("blocked Read did not pick up the new deadline")
+	}
+}
+
+// Extending the deadline of a blocked reader must keep it blocked, and the
+// replaced deadline must not fire on the new one.
+func TestExtendReadDeadlineWhileReadBlocked(t *testing.T) {
+	f := newReceiveFlow(1, 10, nil)
+	if err := f.SetReadDeadline(time.Now().Add(20 * time.Millisecond)); err != nil {
+		t.Fatalf("SetReadDeadline: %v", err)
+	}
+	done := make(chan error, 1)
+	go func() {
+		_, err := f.Read(make([]byte, 100))
+		done <- err
+	}()
+	if err := f.SetReadDeadline(time.Now().Add(time.Hour)); err != nil {
+		t.Fatalf("SetReadDeadline: %v", err)
+	}
+	select {
+	case err := <-done:
+		t.Fatalf("Read returned %v, want it to keep waiting for the extended deadline", err)
+	case <-time.After(100 * time.Millisecond):
+	}
+	f.push(bytes.NewBuffer([]byte{0x42}))
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Errorf("Read error = %v, want nil", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("Read did not return the pushed packet")
+	}
+}
+
+// A deadline must not keep Read from reporting the closed flow.
+func TestReadDeadlineAndClose(t *testing.T) {
+	f := newReceiveFlow(1, 10, nil)
+	if err := f.SetReadDeadline(time.Now().Add(time.Hour)); err != nil {
+		t.Fatalf("SetReadDeadline: %v", err)
+	}
+	done := make(chan error, 1)
+	go func() {
+		_, err := f.Read(make([]byte, 100))
+		done <- err
+	}()
+	if err := f.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	select {
+	case err := <-done:
+		if !errors.Is(err, context.Canceled) {
+			t.Errorf("Read error = %v, want context.Canceled", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("Read did not return after the flow was closed")
+	}
+}
+
+// Racing SetReadDeadline against readers and expiring timers must not panic on
+// a double close of the deadline channel.
+func TestConcurrentSetReadDeadline(t *testing.T) {
+	f := newReceiveFlow(1, 10, nil)
+	var wg sync.WaitGroup
+	for range 8 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for range 100 {
+				if err := f.SetReadDeadline(time.Now().Add(time.Millisecond)); err != nil {
+					t.Error(err)
+					return
+				}
+			}
+		}()
+	}
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for range 100 {
+			_, _ = f.Read(make([]byte, 100))
+		}
+	}()
+	wg.Wait()
+}

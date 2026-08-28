@@ -115,6 +115,8 @@ type stubConn struct {
 
 	// sendCloseErr is returned by every send stream this connection opens.
 	sendCloseErr error
+	// closeErr is returned by CloseWithError.
+	closeErr error
 
 	mutex       sync.Mutex
 	sendStreams []*stubSendStream
@@ -166,7 +168,7 @@ func (c *stubConn) CloseWithError(code uint64, _ string) error {
 	c.closeCode = code
 	c.mutex.Unlock()
 	c.closeOnce.Do(func() { close(c.closed) })
-	return nil
+	return c.closeErr
 }
 
 // awaitClose blocks until the session closes the connection on its own.
@@ -364,5 +366,58 @@ func TestNewFlowAfterClose(t *testing.T) {
 	}
 	if _, err := s.NewReceiveFlow(1); err == nil {
 		t.Error("NewReceiveFlow succeeded on a closed session")
+	}
+}
+
+// Callers must be able to inspect the RoQ error code a session was closed
+// with, not just its message.
+func TestSessionErrorAccessors(t *testing.T) {
+	c := newStubConn()
+	s, err := NewSession(c, true, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.datagrams <- []byte{}
+	c.awaitClose(t)
+	closeWithin(t, s, 5*time.Second)
+
+	_, err = s.NewSendFlow(1)
+	var sessErr SessionError
+	if !errors.As(err, &sessErr) {
+		t.Fatalf("NewSendFlow error = %v, want SessionError", err)
+	}
+	if sessErr.Code() != ErrRoQPacketError {
+		t.Errorf("Code() = %d, want ErrRoQPacketError (%d)", sessErr.Code(), ErrRoQPacketError)
+	}
+	if sessErr.Reason() != "invalid flow ID" {
+		t.Errorf("Reason() = %q, want %q", sessErr.Reason(), "invalid flow ID")
+	}
+}
+
+// Close must report what closing the QUIC connection returned, and keep
+// reporting it on later calls.
+func TestCloseReturnsConnectionError(t *testing.T) {
+	c := newStubConn()
+	c.closeErr = errors.New("connection close failed")
+	s, err := NewSession(c, true, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Close(); !errors.Is(err, c.closeErr) {
+		t.Errorf("Close() = %v, want %v", err, c.closeErr)
+	}
+	if err := s.Close(); !errors.Is(err, c.closeErr) {
+		t.Errorf("second Close() = %v, want %v", err, c.closeErr)
+	}
+}
+
+// The constructors' error return must mean something: a nil connection is
+// rejected instead of panicking in a receive loop later on.
+func TestNewSessionNilConnection(t *testing.T) {
+	if _, err := NewSession(nil, true, nil); !errors.Is(err, errNilConnection) {
+		t.Errorf("NewSession(nil) error = %v, want errNilConnection", err)
+	}
+	if _, err := NewSessionWithAppHandledConn(nil, true, nil); !errors.Is(err, errNilConnection) {
+		t.Errorf("NewSessionWithAppHandledConn(nil) error = %v, want errNilConnection", err)
 	}
 }
