@@ -271,7 +271,7 @@ func (s *Session) handleUniStream(rs ReceiveStream) {
 	reader := quicvarint.NewReader(rs)
 	flowID, err := quicvarint.Read(reader)
 	if err != nil {
-		s.closeWithError(ErrRoQPacketError, "invalid flow ID")
+		rs.CancelRead(ErrRoQPacketError)
 		return
 	}
 
