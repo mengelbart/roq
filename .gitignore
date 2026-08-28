@@ -5,3 +5,5 @@
 *.mp4
 *.h264
 .idea/
+examples/playfromdisk/playfromdisk
+examples/savetodisk/savetodisk
