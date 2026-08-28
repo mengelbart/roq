@@ -25,9 +25,12 @@ type ReceiveFlow struct {
 	bufferPool sync.Pool
 	ctx        context.Context
 	cancelCtx  context.CancelFunc
-	lock       sync.Mutex
-	streams    map[int64]ReceiveStream
-	qlog       *qlog.Logger
+
+	lock    sync.Mutex
+	streams map[int64]ReceiveStream
+	closed  bool
+
+	qlog *qlog.Logger
 }
 
 func newReceiveFlow(id uint64, receiveBufferSize int, qlog *qlog.Logger) *ReceiveFlow {
@@ -44,14 +47,20 @@ func newReceiveFlow(id uint64, receiveBufferSize int, qlog *qlog.Logger) *Receiv
 		cancelCtx: cancel,
 		lock:      sync.Mutex{},
 		streams:   map[int64]ReceiveStream{},
+		closed:    false,
 		qlog:      qlog,
 	}
 }
 
-// push queues packet for reading. If the queue is full, the packet is dropped
-// and its buffer handed back to the pool, so that overload does not defeat the
-// pool by leaking every dropped buffer to the garbage collector.
+// push queues packet for reading. If the queue is full or the flow is closed,
+// the packet is dropped and its buffer handed back to the pool.
 func (f *ReceiveFlow) push(packet *bytes.Buffer) {
+	f.lock.Lock()
+	defer f.lock.Unlock()
+	if f.closed {
+		f.bufferPool.Put(packet)
+		return
+	}
 	select {
 	case f.buffer <- packet:
 	default:
@@ -134,18 +143,21 @@ func (f *ReceiveFlow) readStream(rs ReceiveStream) {
 // dropped and Read returns 0 and io.ErrShortBuffer. Callers should provide a
 // buffer large enough for the largest packet they expect to receive.
 func (f *ReceiveFlow) Read(buf []byte) (int, error) {
-	select {
-	case packet := <-f.buffer:
-		if len(buf) < packet.Len() {
-			f.bufferPool.Put(packet)
-			return 0, io.ErrShortBuffer
-		}
-		n := copy(buf, packet.Bytes())
-		f.bufferPool.Put(packet)
-		return n, nil
-	case <-f.ctx.Done():
+	packet, ok := <-f.buffer
+	if !ok {
 		return 0, f.ctx.Err()
 	}
+	return f.copyPacket(buf, packet)
+}
+
+func (f *ReceiveFlow) copyPacket(buf []byte, packet *bytes.Buffer) (int, error) {
+	if len(buf) < packet.Len() {
+		f.bufferPool.Put(packet)
+		return 0, io.ErrShortBuffer
+	}
+	n := copy(buf, packet.Bytes())
+	f.bufferPool.Put(packet)
+	return n, nil
 }
 
 func (f *ReceiveFlow) SetReadDeadline(t time.Time) error {
@@ -165,8 +177,24 @@ func (f *ReceiveFlow) closeWithError(code uint64) {
 	}
 }
 
+// Close closes the flow.
 func (f *ReceiveFlow) Close() error {
+	// Cancel before closing the buffer, so that a Read woken by the closed
+	// buffer always finds a non-nil error to report.
 	f.cancelCtx()
+	f.closeBuffer()
 	f.closeWithError(ErrRoQNoError)
 	return nil
+}
+
+// closeBuffer makes the flow reject further pushes and closes the packet
+// buffer to unblock Read once the queued packets are drained.
+func (f *ReceiveFlow) closeBuffer() {
+	f.lock.Lock()
+	defer f.lock.Unlock()
+	if f.closed {
+		return
+	}
+	f.closed = true
+	close(f.buffer)
 }
