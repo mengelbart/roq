@@ -1,6 +1,9 @@
 package roq
 
 import (
+	"bytes"
+	"errors"
+	"io"
 	"testing"
 	"time"
 
@@ -65,5 +68,61 @@ func TestReadStreamUnregistersOnClose(t *testing.T) {
 	defer f.lock.Unlock()
 	if len(f.streams) != 0 {
 		t.Errorf("flow still tracks %d streams after close, want 0", len(f.streams))
+	}
+}
+
+// Read must not silently truncate: a caller whose buffer is too small for the
+// next packet gets io.ErrShortBuffer instead of a mangled RTP packet.
+func TestReadShortBuffer(t *testing.T) {
+	f := newReceiveFlow(1, 10, nil)
+	packet := []byte{0x80, 0x60, 0x00, 0x01, 0xde, 0xad, 0xbe, 0xef}
+	f.push(bytes.NewBuffer(packet))
+
+	buf := make([]byte, len(packet)-1)
+	n, err := f.Read(buf)
+	if !errors.Is(err, io.ErrShortBuffer) {
+		t.Fatalf("Read with undersized buffer returned error %v, want io.ErrShortBuffer", err)
+	}
+	if n != 0 {
+		t.Errorf("Read with undersized buffer returned n = %d, want 0", n)
+	}
+}
+
+// A short read must not stall the flow: the truncated packet is dropped and the
+// next packet is still readable.
+func TestReadAfterShortBuffer(t *testing.T) {
+	f := newReceiveFlow(1, 10, nil)
+	first := []byte{0x80, 0x60, 0x00, 0x01}
+	second := []byte{0x42}
+	f.push(bytes.NewBuffer(first))
+	f.push(bytes.NewBuffer(second))
+
+	if _, err := f.Read(make([]byte, len(first)-1)); !errors.Is(err, io.ErrShortBuffer) {
+		t.Fatalf("Read with undersized buffer returned error %v, want io.ErrShortBuffer", err)
+	}
+
+	buf := make([]byte, 65535)
+	n, err := f.Read(buf)
+	if err != nil {
+		t.Fatalf("Read: %v", err)
+	}
+	if !bytes.Equal(buf[:n], second) {
+		t.Errorf("Read returned %v, want %v", buf[:n], second)
+	}
+}
+
+// A buffer of exactly the packet size is not short.
+func TestReadExactBuffer(t *testing.T) {
+	f := newReceiveFlow(1, 10, nil)
+	packet := []byte{0x80, 0x60, 0x00, 0x01, 0xde, 0xad, 0xbe, 0xef}
+	f.push(bytes.NewBuffer(packet))
+
+	buf := make([]byte, len(packet))
+	n, err := f.Read(buf)
+	if err != nil {
+		t.Fatalf("Read: %v", err)
+	}
+	if !bytes.Equal(buf[:n], packet) {
+		t.Errorf("Read returned %v, want %v", buf[:n], packet)
 	}
 }
