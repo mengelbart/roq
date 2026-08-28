@@ -67,7 +67,12 @@ func (f *SendFlow) WriteRTPBytes(packet []byte) error {
 
 // NewSendStream creates a new Stream for sending outgoing RTP and RTCP packets
 // over a QUIC stream.
-func (f *SendFlow) NewSendStream(ctx context.Context, priority uint32, incremantal bool) (*RTPSendStream, error) {
+//
+// priority and incremental are applied to the new stream only if the
+// Connection of the session opens SendStreams that implement
+// PrioritySendStream. They are ignored otherwise, which is the case for
+// QUICGoConnection, because quic-go does not implement stream priorities.
+func (f *SendFlow) NewSendStream(ctx context.Context, priority uint32, incremental bool) (*RTPSendStream, error) {
 	if err := f.isClosed(); err != nil {
 		return nil, err
 	}
@@ -78,9 +83,9 @@ func (f *SendFlow) NewSendStream(ctx context.Context, priority uint32, incremant
 	priorityStream, ok := s.(PrioritySendStream)
 	if ok {
 		f.logger.Debug("setting stream priority",
-			"flowID", f.id, "streamID", s.ID(), "priority", priority, "incremental", incremantal)
+			"flowID", f.id, "streamID", s.ID(), "priority", priority, "incremental", incremental)
 		priorityStream.SetPriority(priority)
-		priorityStream.SetIncremental(incremantal)
+		priorityStream.SetIncremental(incremental)
 	}
 
 	stream, err := newRTPSendStream(s, f.id, f.flowID, f.qlog)
