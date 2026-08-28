@@ -4,11 +4,16 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
+	"log"
+	"os"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/quic-go/quic-go"
 	"github.com/quic-go/quic-go/quicvarint"
 )
 
@@ -307,5 +312,66 @@ func TestConcurrentPushAndClose(t *testing.T) {
 		if len(f.buffer) != 0 {
 			t.Fatalf("closed flow still holds %d packets no Read can return", len(f.buffer))
 		}
+	}
+}
+
+// readStream must recognise wrapped errors: a wrapped io.EOF ends the stream
+// quietly, and a wrapped stream error is reported once, not twice.
+func TestReadStreamWrappedErrors(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		err  error
+		want string
+	}{{
+		name: "wrapped EOF",
+		err:  fmt.Errorf("read failed: %w", io.EOF),
+		want: "",
+	}, {
+		name: "wrapped stream error",
+		err:  fmt.Errorf("read failed: %w", &quic.StreamError{StreamID: 1, ErrorCode: 42}),
+		want: "got stream error while reading length",
+	}, {
+		name: "other error",
+		err:  errors.New("boom"),
+		want: "got unexpected error while reading length",
+	}} {
+		t.Run(tc.name, func(t *testing.T) {
+			var logs bytes.Buffer
+			log.SetOutput(&logs)
+			defer log.SetOutput(os.Stderr)
+
+			f := newReceiveFlow(1, 10, nil)
+			payload := []byte{0x42}
+			data := quicvarint.Append(nil, uint64(len(payload)))
+			data = append(data, payload...)
+			f.readStream(&stubReceiveStream{
+				id:        1,
+				data:      data,
+				readErr:   tc.err,
+				cancelled: make(chan struct{}),
+			})
+
+			if len(f.buffer) != 1 {
+				t.Errorf("flow buffered %d packets, want 1", len(f.buffer))
+			}
+			lines := 0
+			for _, line := range strings.Split(strings.TrimSpace(logs.String()), "\n") {
+				if line != "" {
+					lines++
+				}
+			}
+			if tc.want == "" {
+				if lines != 0 {
+					t.Errorf("logged %q, want nothing", logs.String())
+				}
+				return
+			}
+			if lines != 1 {
+				t.Errorf("logged %d lines, want 1:\n%s", lines, logs.String())
+			}
+			if !strings.Contains(logs.String(), tc.want) {
+				t.Errorf("logged %q, want it to contain %q", logs.String(), tc.want)
+			}
+		})
 	}
 }
