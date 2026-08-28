@@ -3,6 +3,7 @@ package roq
 import (
 	"bytes"
 	"context"
+	"errors"
 	"io"
 	"log"
 	"sync"
@@ -95,12 +96,13 @@ func (f *ReceiveFlow) readStream(rs ReceiveStream) {
 	for {
 		length, err := quicvarint.Read(reader)
 		if err != nil {
-			if err == io.EOF {
+			if errors.Is(err, io.EOF) {
 				return
 			}
-			streamErr, ok := err.(*quic.StreamError)
-			if ok {
-				log.Printf("got stream error: %v", streamErr)
+			var streamErr *quic.StreamError
+			if errors.As(err, &streamErr) {
+				log.Printf("got stream error while reading length: %v", streamErr)
+				return
 			}
 			log.Printf("got unexpected error while reading length: %v", err)
 			return
@@ -110,9 +112,10 @@ func (f *ReceiveFlow) readStream(rs ReceiveStream) {
 		b.Reset()
 		n, err := b.ReadFrom(r)
 		if err != nil {
-			streamErr, ok := err.(*quic.StreamError)
-			if ok {
-				log.Printf("got stream error: %v", streamErr)
+			var streamErr *quic.StreamError
+			if errors.As(err, &streamErr) {
+				log.Printf("got stream error after reading %v bytes of payload: %v", n, streamErr)
+				return
 			}
 			log.Printf("got unexpected error after reading %v bytes of payload: %v", n, err)
 			return

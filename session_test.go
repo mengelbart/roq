@@ -68,9 +68,12 @@ func (s *stubSendStream) isClosed() bool {
 // stubReceiveStream feeds a fixed payload. Once it is exhausted the stream
 // either ends (eof) or stays open until CancelRead.
 type stubReceiveStream struct {
-	id        int64
-	data      []byte
-	eof       bool
+	id   int64
+	data []byte
+	eof  bool
+	// readErr, if set, is returned once the payload is exhausted, in
+	// preference to eof and parking.
+	readErr   error
 	cancelled chan struct{}
 	once      sync.Once
 
@@ -91,6 +94,9 @@ func (s *stubReceiveStream) Read(p []byte) (int, error) {
 		n := copy(p, s.data)
 		s.data = s.data[n:]
 		return n, nil
+	}
+	if s.readErr != nil {
+		return 0, s.readErr
 	}
 	if s.eof {
 		return 0, io.EOF
