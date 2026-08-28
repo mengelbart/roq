@@ -1,6 +1,9 @@
 package roq
 
 import (
+	"io"
+	"sync"
+
 	"github.com/mengelbart/qlog"
 	roqqlog "github.com/mengelbart/qlog/roq"
 	"github.com/quic-go/quic-go/quicvarint"
@@ -10,9 +13,15 @@ type RTPSendStream struct {
 	stream      SendStream
 	flowID      uint64
 	flowIDBytes []byte
-	sentFlowID  bool
-	buffer      []byte
 	qlog        *qlog.Logger
+
+	// lock guards the fields below, which are mutated by every write.
+	lock       sync.Mutex
+	sentFlowID bool
+	buffer     []byte
+	// pending is the tail of the last frame that stream.Write did not accept.
+	// It has to reach the peer before any following packet does.
+	pending []byte
 }
 
 func newRTPSendStream(stream SendStream, flowID uint64, flowIDBytes []byte, qlog *qlog.Logger) (*RTPSendStream, error) {
@@ -26,16 +35,43 @@ func newRTPSendStream(stream SendStream, flowID uint64, flowIDBytes []byte, qlog
 	}, nil
 }
 
-// WriteRTPBytes sends an RTP or RTCP packet on the stream.
+// WriteRTPBytes sends an RTP or RTCP packet on the stream. It usually doesn't
+// make sense to call this method from multiple goroutines concurrently, but it
+// is safe for concurrent use.
+//
+// The returned count is the number of bytes of packet that reached the stream,
+// which is len(packet) on success. A frame is length-prefixed, so a partial
+// write is recoverable: the bytes the peer has not seen are written first on
+// the next call, before the next packet. Callers must therefore not re-send a
+// packet that was reported short, or the peer receives it twice.
 func (s *RTPSendStream) WriteRTPBytes(packet []byte) (int, error) {
+	s.lock.Lock()
+	defer s.lock.Unlock()
+
+	// Nothing may go on the wire ahead of the tail of an earlier frame.
+	if len(s.pending) > 0 {
+		if err := s.flush(); err != nil {
+			return 0, err
+		}
+	}
+
 	s.buffer = s.buffer[0:0]
 	if !s.sentFlowID {
 		s.buffer = append(s.buffer, s.flowIDBytes...)
 		s.sentFlowID = true
 	}
 	s.buffer = quicvarint.Append(s.buffer, uint64(len(packet)))
+	headerLen := len(s.buffer)
 	s.buffer = append(s.buffer, packet...)
+
 	n, err := s.stream.Write(s.buffer)
+	if n < len(s.buffer) {
+		// s.buffer is reused by the next call, so the tail has to be copied.
+		s.pending = append(s.pending[0:0], s.buffer[n:]...)
+		if err == nil {
+			err = io.ErrShortWrite
+		}
+	}
 	if s.qlog != nil {
 		raw := make([]byte, len(s.buffer))
 		m := copy(raw, s.buffer)
@@ -44,7 +80,7 @@ func (s *RTPSendStream) WriteRTPBytes(packet []byte) (int, error) {
 			StreamID:  s.stream.ID(),
 			Packet: roqqlog.Packet{
 				FlowID: s.flowID,
-				Length: uint64(n),
+				Length: uint64(len(s.buffer)),
 				Raw: &qlog.RawInfo{
 					Length:        uint64(m),
 					PayloadLength: uint64(m),
@@ -53,15 +89,30 @@ func (s *RTPSendStream) WriteRTPBytes(packet []byte) (int, error) {
 			},
 		})
 	}
-	return len(packet), err
+	return min(max(n-headerLen, 0), len(packet)), err
 }
 
-// CancelStream closes the stream with the given error code.
+// flush writes the tail of a frame that an earlier partial write left behind.
+// The caller must hold s.lock.
+func (s *RTPSendStream) flush() error {
+	n, err := s.stream.Write(s.pending)
+	s.pending = s.pending[:copy(s.pending, s.pending[n:])]
+	if err == nil && len(s.pending) > 0 {
+		err = io.ErrShortWrite
+	}
+	return err
+}
+
+// CancelStream closes the stream with the given error code. It may be called
+// concurrently with WriteRTPBytes, and is what unblocks a write that is blocked
+// on flow control.
 func (s *RTPSendStream) CancelStream(errorCode uint64) {
 	s.stream.CancelWrite(errorCode)
 }
 
-// Close closes the stream gracefully.
+// Close closes the stream gracefully. It may be called concurrently with
+// WriteRTPBytes. Close does not flush the tail of a partially written frame, so
+// closing after a short write leaves the peer with a truncated final frame.
 func (s *RTPSendStream) Close() error {
 	return s.stream.Close()
 }

@@ -9,17 +9,49 @@ import (
 	"time"
 )
 
-// stubSendStream is a SendStream that records writes and closes.
+// stubSendStream is a SendStream that records writes and closes. writeFn, when
+// set, decides what each Write accepts; by default everything is accepted.
 type stubSendStream struct {
 	id       int64
 	closeErr error
+	writeFn  func([]byte) (int, error)
 	mutex    sync.Mutex
 	closed   bool
+	written  [][]byte
 }
 
-func (s *stubSendStream) Write(p []byte) (int, error) { return len(p), nil }
-func (s *stubSendStream) ID() int64                   { return s.id }
-func (s *stubSendStream) CancelWrite(uint64)          {}
+func (s *stubSendStream) Write(p []byte) (int, error) {
+	n, err := len(p), error(nil)
+	if s.writeFn != nil {
+		n, err = s.writeFn(p)
+	}
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+	// The caller reuses its buffer across calls, so the bytes must be copied.
+	s.written = append(s.written, append([]byte{}, p[:max(min(n, len(p)), 0)]...))
+	return n, err
+}
+
+// wire returns every byte the stream accepted, in the order it accepted them.
+func (s *stubSendStream) wire() []byte {
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+	var out []byte
+	for _, w := range s.written {
+		out = append(out, w...)
+	}
+	return out
+}
+
+// writes returns the number of Write calls made on the stream.
+func (s *stubSendStream) writes() int {
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+	return len(s.written)
+}
+
+func (s *stubSendStream) ID() int64          { return s.id }
+func (s *stubSendStream) CancelWrite(uint64) {}
 func (s *stubSendStream) Close() error {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
