@@ -121,9 +121,17 @@ func (f *ReceiveFlow) readStream(rs ReceiveStream) {
 	}
 }
 
+// Read reads the next RTP packet of the flow into buf. Packets are not split
+// across calls: if buf is too small to hold the complete packet, the packet is
+// dropped and Read returns 0 and io.ErrShortBuffer. Callers should provide a
+// buffer large enough for the largest packet they expect to receive.
 func (f *ReceiveFlow) Read(buf []byte) (int, error) {
 	select {
 	case packet := <-f.buffer:
+		if len(buf) < packet.Len() {
+			f.bufferPool.Put(packet)
+			return 0, io.ErrShortBuffer
+		}
 		n := copy(buf, packet.Bytes())
 		f.bufferPool.Put(packet)
 		return n, nil
