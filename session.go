@@ -19,6 +19,11 @@ type SendStream interface {
 	CancelWrite(uint64)
 }
 
+// PrioritySendStream is implemented by SendStreams that support stream
+// priorities. quic-go does not implement stream priorities, so the SendStreams
+// of QUICGoConnection do not implement it either: the priority and incremental
+// arguments of SendFlow.NewSendStream are only honored by Connection
+// implementations that provide it.
 type PrioritySendStream interface {
 	SetPriority(p uint32)
 	SetIncremental(b bool)
